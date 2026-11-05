@@ -9,7 +9,7 @@ The remote machine runs a **full DSH**. SSH is only the transport; `dsh` on that
 
 ## Before you start
 
-1. Resolve the machine to an **SSH alias**, never to a raw user-typed host string. Aliases live in `~/.ssh/config`; this plugin's registry is `~/.dsh/dsh-hosts.json` — read it first (`hosts[].alias`, `hosts[].remotePort`, `hosts[].command`).
+1. Resolve the machine to an **SSH alias**, never to a raw user-typed host string. Aliases live in `~/.ssh/config`; this plugin's registry is `~/.dsh/remote-ssh.json` — read it first (`hosts[].alias`, `hosts[].remotePort`). The older name `~/.dsh/dsh-hosts.json` belongs to a previous plugin version and must not be edited: the running plugin does not read it.
 2. Probe both a system and a prefix install:
 
    ```bash
@@ -121,6 +121,15 @@ Only for a machine the user names that the config does not cover yet. The config
 4. **Verify resolution, not just syntax**: `ssh -G <alias> | grep -E '^(hostname|user|port) '` must show the values you wrote.
 5. **Verify connectivity**: `ssh -o BatchMode=yes -o ConnectTimeout=8 <alias> true`. A failure here is an auth or network fact to report, not something to paper over.
 6. Report the exact block you wrote, the line range, and the backup path.
+
+## If the launch port differs from the registry
+
+The plugin stores the port per host. When you move `dsh web` to a different port, either:
+
+- ask the user to change **Remote DSH port** in the plugin's edit dialog (preferred — the panel owns that file), or
+- edit `~/.dsh/remote-ssh.json` **only after** the panel is closed, then tell the user to reload the panel.
+
+A tunnel that is already open keeps its old target; the plugin rebuilds it on the next connect once the registry port changes. Never edit the legacy `dsh-hosts.json`.
 
 ## Opening the web UI (the per-process token)
 

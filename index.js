@@ -294,8 +294,8 @@ function openTunnel(host, localPort, password) {
   })
   let stderr = ''
   child.stderr.on('data', (chunk) => { stderr += chunk })
-  child.on('close', () => { if (tunnels.get(host.name) === child) tunnels.delete(host.name) })
-  tunnels.set(host.name, child)
+  child.on('close', () => { if (tunnels.get(host.name)?.child === child) tunnels.delete(host.name) })
+  tunnels.set(host.name, { child, remotePort: Number(host.remotePort ?? settings.defaultRemotePort) })
   return { child, getStderr: () => stderr }
 }
 
@@ -452,12 +452,18 @@ async function stopRemote(host) {
  * (ssh + our -L form + ExitOnForwardFailure) so no other tool's session is hit.
  */
 async function cleanupLocalPort(localPort, remotePort) {
-  const result = await run('ps', ['-eo', 'pid=,args='], 8000)
-  const needle = `-L ${localPort}:127.0.0.1:${remotePort}`
+  const result = await run('ps', ['-eo', 'pid=,comm=,args='], 8000)
+  // Match the local port only: a tunnel may have been left over after the remote
+  // port was changed, and it still occupies this local port.
+  const needle = `-L ${localPort}:127.0.0.1:`
   const pids = []
   for (const line of result.stdout.split('\n')) {
-    if (!line.includes(needle) || !line.includes('ExitOnForwardFailure=yes') || !/ssh/.test(line)) continue
-    const pid = Number(line.trim().split(/\s+/)[0])
+    const columns = line.trim().split(/\s+/)
+    // Require comm=ssh: a shell whose command line merely mentions the same string
+    // (a wrapper, or our own invocation) must never be signalled.
+    if (columns[1] !== 'ssh') continue
+    if (!line.includes(needle) || !line.includes('ExitOnForwardFailure=yes')) continue
+    const pid = Number(columns[0])
     if (Number.isInteger(pid) && pid > 0) pids.push(pid)
   }
   for (const pid of pids) { try { process.kill(pid, 'SIGTERM') } catch {} }
@@ -619,6 +625,13 @@ async function handleFetch(request) {
       const localPort = assignLocalPort(config, host, index)
 
       let health = { ok: false }
+      const existing = tunnels.get(host.name)
+      if (existing && existing.remotePort !== Number(host.remotePort ?? settings.defaultRemotePort)) {
+        // The registry port changed while a tunnel was up: the old forward points at
+        // the previous port, so it must go before the new one can be judged.
+        try { existing.child.kill() } catch {}
+        tunnels.delete(host.name)
+      }
       const reusedTunnel = tunnels.has(host.name) && await probePort(localPort)
       // Reuse only a tunnel that still serves the remote: a live tunnel pointing at a
       // dead dsh web must fall through to the health/start handling below.
@@ -771,10 +784,10 @@ async function handleFetch(request) {
     if (method === 'POST' && route === '/close') {
       const config = await loadConfig()
       const host = config.hosts.find((item) => item.name === body.name)
-      const child = tunnels.get(body.name)
-      const closed = Boolean(child)
-      if (child) {
-        try { child.kill() } catch {}
+      const entry = tunnels.get(body.name)
+      const closed = Boolean(entry)
+      if (entry) {
+        try { entry.child.kill() } catch {}
         tunnels.delete(body.name)
       }
       // Stopping the remote service is a side effect on the other machine, so it
@@ -891,7 +904,7 @@ export function apply(ctx, config) {
     return () => {
       try { disposeSkill() } catch {}
       for (const dispose of disposeRoutes) { try { Promise.resolve(dispose()).catch(() => {}) } catch {} }
-      for (const child of tunnels.values()) { try { child.kill() } catch {} }
+      for (const entry of tunnels.values()) { try { entry.child.kill() } catch {} }
       tunnels.clear()
     }
   })
