@@ -3,6 +3,24 @@
   "version": "0.6.3",
   "private": false,
   "description": "SSH remote hosts for DeepSeek Harness: pick a host from ~/.ssh/config, keep an \"SSH local forward, and open its DSH web UI in the browser.",
+  "author": "Strepsiades",
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "ssh",
+    "ssh-tunnel",
+    "remote",
+    "port-forward"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/strepsiades/dsh-remote-ssh.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "exports": {
     ".": "./index.js",
@@ -33,22 +51,5 @@
         "@deepseek-ai/dsh-client-ui-sidebar"
       ]
     }
-  },
-  "license": "MIT",
-  "keywords": [
-    "dsh",
-    "dsh-plugin",
-    "deepseek-harness",
-    "ssh",
-    "ssh-tunnel",
-    "remote",
-    "port-forward"
-  ],
-  "publishConfig": {
-    "access": "public"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/strepsiades/dsh-remote-ssh.git"
   }
 }

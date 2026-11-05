@@ -101,7 +101,7 @@ Local UI checks live in `scripts/` and are intentionally not tracked.
 
 ## License
 
-MIT
+MIT © Strepsiades
 
 ---
 
@@ -175,4 +175,4 @@ dsh plugin add @strepsiades/dsh-remote-ssh
 
 ## 许可
 
-MIT
+MIT © Strepsiades
