@@ -524,7 +524,7 @@ window.__ModuleLoader__.load({
 
         return h('div', {
           style: {
-            padding: '2.618em 1.9em 2em', width: '100%', maxWidth: '58em', margin: '0 auto',
+            padding: '2.618em 1.9em 2em', width: '100%', maxWidth: '46em', margin: '0 auto',
             height: '100%', overflow: 'auto', boxSizing: 'border-box', lineHeight: 1.55,
           },
         },
@@ -533,7 +533,7 @@ window.__ModuleLoader__.load({
           notice ? banner(notice, 'var(--dsh-accent, #4c8dff)') : null,
           showSettings && SettingsComponent ? settingsModal() : null,
           body,
-          h('div', { style: Object.assign({ fontSize: '0.7em', marginTop: '1.618em', opacity: 0.6 }, SURFACE.dim) }, 'build 0.6.2'),
+          h('div', { style: Object.assign({ fontSize: '0.7em', marginTop: '1.618em', opacity: 0.6 }, SURFACE.dim) }, 'build 0.6.3'),
           adding ? addModal() : null,
           editing ? editModal() : null,
           authPrompt ? passwordModal() : null,
