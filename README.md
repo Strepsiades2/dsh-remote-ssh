@@ -45,6 +45,16 @@ Reload DSH, then look for **Remote SSH** in the sidebar.
 | --- | --- |
 | SSH config path | Empty means `~/.ssh/config` |
 | Default remote port | Fallback for new hosts and when opening (default `3000`) |
+| Start the remote DSH automatically | Off by default. When on, connecting to a host whose `dsh web` is down will launch it |
+| Stop the remote DSH when disconnecting | Off by default. When on, disconnecting also stops the process listening on the DSH port |
+
+## Starting the remote DSH
+
+If the tunnel is up but `dsh web` is not answering, the error offers **Start remotely**: the plugin runs a launch command on the remote, waits up to 30 seconds for it to become ready, and then continues opening the UI.
+
+The row also shows three states: **Idle** (no tunnel), **Service not responding** (tunnel up, remote silent) and **Ready**. If a local port is held by a leftover ssh that is not ours, the error offers **Clean up port**, which matches only ssh processes carrying our exact forward and ends them; nothing else is touched.
+
+The default launch command resolves whichever install exists (`dsh` on `PATH`, else `~/.local/dsh/node_modules/.bin/dsh`), detaches with `setsid` when available, and logs to `~/.dsh-web.log`. A host may override it with its own command, where `{port}` is replaced by the remote DSH port.
 
 ## Per-host options
 
@@ -53,6 +63,7 @@ Reload DSH, then look for **Remote SSH** in the sidebar.
 | Remote DSH port | Where `dsh web` listens on the remote |
 | Local port | Leave empty to auto-assign; pinning it keeps the browser cookie valid (cookies bind to `hostname:port`) |
 | Web token | Usually empty — read from the remote log on every connect. Fill it only to pin a value |
+| Start command | Optional override used when the plugin has to start `dsh web`; `{port}` is substituted |
 
 ## How it works
 
@@ -134,6 +145,8 @@ dsh plugin add @strepsiades/dsh-remote-ssh
 | --- | --- |
 | SSH 配置文件路径 | 留空表示 `~/.ssh/config` |
 | 默认远端端口 | 新主机与打开时的兜底值（默认 3000） |
+| 远端未运行时自动启动 | 默认关闭。打开后，连接到 `dsh web` 没运行的主机会自动启动它 |
+| 断开时同时停止远端 DSH | 默认关闭。打开后，断开会在远端停掉监听该端口的进程 |
 
 ## 每台主机
 
@@ -142,6 +155,15 @@ dsh plugin add @strepsiades/dsh-remote-ssh
 | 远端 DSH 端口 | `dsh web` 在远端的监听端口 |
 | 本地端口 | 留空自动分配；固定它可让浏览器 cookie 长期有效 |
 | Web token | 一般留空，每次连接自动读取 |
+| 启动命令 | 可选；插件需要启动远端时执行，`{port}` 会替换为远端端口 |
+
+## 启动远端 DSH
+
+如果隧道已建立但 `dsh web` 没有响应，错误提示里会出现【启动远端】：插件在远端执行启动命令，最多等待 30 秒就绪，然后继续打开界面。
+
+行内状态分三种：**未连接**、**服务未响应**（隧道在、远端没响应）、**已就绪**。如果本地端口被一条不属于本插件的 ssh 占着，错误里会出现【清理端口】——它只匹配带本插件同款转发参数的 ssh 进程，其他连接一律不碰。
+
+默认启动命令会自动探测安装位置（`PATH` 里的 `dsh`，或 `~/.local/dsh/node_modules/.bin/dsh`），有 `setsid` 时用它脱离会话，日志写到 `~/.dsh-web.log`。每台主机可以覆盖这条命令，`{port}` 会被替换为远端端口。
 
 ## 安全
 

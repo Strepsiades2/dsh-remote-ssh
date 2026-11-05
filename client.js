@@ -30,6 +30,16 @@ window.__ModuleLoader__.load({
         'action.edit': 'Edit',
         'action.editHost': 'Edit host',
         'action.enterPassword': 'Enter password',
+        'action.startRemote': 'Start remotely',
+        'action.cleanupPort': 'Clean up port',
+        'state.ready': 'Ready',
+        'state.degraded': 'Service not responding',
+        'state.idle': 'Idle',
+        'notice.portCleaned': 'Occupied port cleaned',
+        'notice.portStillBusy': 'Port is still in use by another program',
+        'notice.stoppedRemote': 'Forward closed and remote DSH stopped',
+        'settings.stopRemote': 'Stop the remote DSH when disconnecting',
+        'settings.stopRemoteHint': 'Off by default: disconnecting only closes the local forward.',
         'action.connect': 'Connect',
         'password.title': 'Password required',
         'password.hint': 'used for this connection only, never saved',
@@ -41,7 +51,6 @@ window.__ModuleLoader__.load({
         'action.ai': 'Let AI configure',
         'action.aiCopied': 'Copied ✓',
         'state.loading': 'Loading…',
-        'state.connected': 'Connected',
         'modal.addTitle': 'Add a host',
         'modal.addHint': 'Hosts come from your SSH config. Edit that file for user, port or keys.',
         'modal.search': 'Filter',
@@ -56,6 +65,7 @@ window.__ModuleLoader__.load({
         'notice.configOpened': 'Opened',
         'notice.copied': 'Copied. Close this dialog, then paste it into the conversation on the left.',
         'notice.copyFailed': 'Automatic copy is unavailable — select the text below and copy it.',
+        'notice.starting': 'Starting the remote DSH…',
         'notice.noToken': 'Forward is up but no token file was found on the remote',
         'notice.opened': 'Connected',
         'edit.hint': 'Everything here is stored per host. Connection details stay in your SSH config.',
@@ -67,9 +77,14 @@ window.__ModuleLoader__.load({
         'edit.token': 'Web token (optional)',
         'edit.tokenPlaceholder': 'Leave empty — read automatically',
         'edit.tokenHint': 'Read from the remote log on every connect. Fill it only to pin a specific value.',
+        'edit.startCommand': 'Start command (optional)',
+        'edit.startCommandPlaceholder': 'empty = auto-detect dsh',
+        'edit.startCommandHint': 'Runs on the remote when starting it; {port} is replaced with the remote DSH port.',
         'settings.path': 'SSH config file',
         'settings.pathHint': 'Empty means ~/.ssh/config',
         'settings.port': 'Default remote port',
+        'settings.autoStart': 'Start the remote DSH automatically when it is not running',
+        'settings.autoStartHint': 'Off by default: connecting never launches anything on the remote unless you ask.',
         'settings.hint': 'Defaults apply to hosts that do not override them.',
       },
       zh: {
@@ -88,6 +103,16 @@ window.__ModuleLoader__.load({
         'action.edit': '编辑',
         'action.editHost': '去编辑',
         'action.enterPassword': '输入密码',
+        'action.startRemote': '启动远端',
+        'action.cleanupPort': '清理端口',
+        'state.ready': '已就绪',
+        'state.degraded': '服务未响应',
+        'state.idle': '未连接',
+        'notice.portCleaned': '已清理被占用的端口',
+        'notice.portStillBusy': '端口仍被其它程序占用',
+        'notice.stoppedRemote': '已断开转发，并停止远端 DSH',
+        'settings.stopRemote': '断开时同时停止远端 DSH',
+        'settings.stopRemoteHint': '默认关闭：断开只关闭本地转发，不影响远端进程。',
         'action.connect': '连接',
         'password.title': '需要密码',
         'password.hint': '仅用于本次连接，不会保存',
@@ -99,7 +124,6 @@ window.__ModuleLoader__.load({
         'action.ai': 'AI 帮我配',
         'action.aiCopied': '已复制 ✓',
         'state.loading': '加载中…',
-        'state.connected': '已连接',
         'modal.addTitle': '添加主机',
         'modal.addHint': '主机来自 SSH 配置。用户、端口、密钥请直接改那个文件。',
         'modal.search': '筛选',
@@ -114,6 +138,7 @@ window.__ModuleLoader__.load({
         'notice.configOpened': '已打开',
         'notice.copied': '已复制。关闭此对话框，粘贴到左侧对话里即可。',
         'notice.copyFailed': '无法自动复制，请手动选中下面的文本复制。',
+        'notice.starting': '正在启动远端 DSH…',
         'notice.noToken': '转发已建立，但远端没有 token 文件',
         'notice.opened': '已连接',
         'edit.hint': '这里只保存每台主机自己的信息；连接参数仍在 SSH 配置里。',
@@ -125,9 +150,14 @@ window.__ModuleLoader__.load({
         'edit.token': 'Web token（可选）',
         'edit.tokenPlaceholder': '留空即可，自动读取',
         'edit.tokenHint': '每次连接自动从远端日志读取；只有想固定某个值时才填。',
+        'edit.startCommand': '启动命令（可选）',
+        'edit.startCommandPlaceholder': '留空 = 自动探测 dsh',
+        'edit.startCommandHint': '需要启动时在远端执行；{port} 会替换为远端 DSH 端口。',
         'settings.path': 'SSH 配置文件',
         'settings.pathHint': '留空 = ~/.ssh/config',
         'settings.port': '默认远端端口',
+        'settings.autoStart': '远端未运行时自动启动',
+        'settings.autoStartHint': '默认关闭：除非你打开这个开关，连接不会在远端启动任何东西。',
         'settings.hint': '默认值只作用于没有单独设置的主机。',
       },
     }
@@ -164,6 +194,7 @@ window.__ModuleLoader__.load({
         text: prefix ? `${prefix}: ${message}` : message,
         hint: payload.hint || null,
         action: payload.action || null,
+        actions: payload.actions || null,
       }
     }
 
@@ -287,9 +318,9 @@ window.__ModuleLoader__.load({
           .catch((problem) => setError(failureOf(problem)))
 
         /** POST /open is idempotent: it reuses a live tunnel and returns its token URL. */
-        const requestUrl = (name, password) => api('/open', {
+        const requestUrl = (name, password, options) => api('/open', {
           method: 'POST',
-          body: JSON.stringify(password ? { name, password } : { name }),
+          body: JSON.stringify(Object.assign({ name }, password ? { password } : {}, options || {})),
         })
 
 
@@ -319,9 +350,10 @@ window.__ModuleLoader__.load({
           setError(failureOf(problem, name))
         }
 
-        const open = (name, password) => {
+        const open = (name, password, options) => {
           setBusy(name); setNotice(null); setError(null)
-          requestUrl(name, password)
+          if (options && options.start) setNotice(tt('notice.starting'))
+          requestUrl(name, password, options)
             .then((result) => {
               if (result.url) setNotice(`${tt('notice.opened')} · 127.0.0.1:${result.localPort}`)
               else setError({ text: tt('notice.noToken'), hint: result.hint || null, action: { kind: 'edit', name } })
@@ -332,9 +364,10 @@ window.__ModuleLoader__.load({
         }
 
         /** Establish (or reuse) the forward, then hand the token URL to the browser. */
-        const openBrowser = (name, password) => {
+        const openBrowser = (name, password, options) => {
           setBusy(name); setError(null)
-          requestUrl(name, password)
+          if (options && options.start) setNotice(tt('notice.starting'))
+          requestUrl(name, password, options)
             .then((result) => {
               if (result.url) window.open(result.url, '_blank', 'noopener')
               else setError({ text: tt('notice.noToken'), hint: result.hint || null, action: { kind: 'edit', name } })
@@ -345,7 +378,11 @@ window.__ModuleLoader__.load({
         }
 
         const disconnect = (name) => api('/close', { method: 'POST', body: JSON.stringify({ name }) })
-          .then(() => { setNotice(null); refresh() })
+          .then((result) => {
+            setNotice(result && result.stopped && result.stopped.ok ? tt('notice.stoppedRemote') : null)
+            refresh()
+          })
+          .catch((problem) => setError(failureOf(problem, name)))
 
         const header = h('div', { style: { display: 'flex', alignItems: 'flex-end', gap: '0.8em', marginBottom: '1.618em' } },
           h('div', null,
@@ -362,7 +399,9 @@ window.__ModuleLoader__.load({
           if (!payload) return null
           const text = typeof payload === 'string' ? payload : payload.text
           const hint = typeof payload === 'string' ? null : payload.hint
-          const action = typeof payload === 'string' ? null : payload.action
+          const actions = typeof payload === 'string'
+            ? []
+            : (payload.actions || (payload.action ? [payload.action] : []))
           return h('div', {
             style: {
               border: '1px solid ' + tone, color: tone, borderRadius: SURFACE.radius,
@@ -371,13 +410,17 @@ window.__ModuleLoader__.load({
           },
             h('div', null, text),
             hint ? h('div', { style: { marginTop: '0.2em', opacity: 0.85, fontSize: '0.95em' } }, hint) : null,
-            action
-              ? h('div', { style: { marginTop: '0.4em' } },
-                  textButton(
-                    action.kind === 'ai' ? tt('action.ai') : action.kind === 'password' ? tt('action.enterPassword') : tt('action.editHost'),
+            actions.length
+              ? h('div', { style: { marginTop: '0.4em', display: 'flex', gap: '0.4em', flexWrap: 'wrap' } },
+                  ...actions.map((action) => textButton(
+                    action.kind === 'ai' ? tt('action.ai')
+                      : action.kind === 'password' ? tt('action.enterPassword')
+                        : action.kind === 'start' ? tt('action.startRemote')
+                          : action.kind === 'cleanup' ? tt('action.cleanupPort')
+                            : tt('action.editHost'),
                     () => runErrorAction(action),
                     { style: { borderColor: tone, color: tone } },
-                  ))
+                  )))
               : null,
           )
         }
@@ -386,6 +429,19 @@ window.__ModuleLoader__.load({
           const host = hosts.find((item) => item.name === action.name)
           if (action.kind === 'ai') { copyText(prepPrompt(action.name || '')); return }
           if (action.kind === 'password') { setError(null); setAuthPrompt({ name: action.name, value: '', viaBrowser: Boolean(action.viaBrowser) }); return }
+          if (action.kind === 'start') { setError(null); open(action.name, null, { start: true }); return }
+          if (action.kind === 'cleanup') {
+            setError(null)
+            setBusy(action.name)
+            api('/cleanup-port', { method: 'POST', body: JSON.stringify({ name: action.name }) })
+              .then((result) => {
+                if (result.listening) setError({ text: result.hint || tt('notice.portStillBusy') })
+                else setNotice(tt('notice.portCleaned'))
+              })
+              .catch((problem) => setError(failureOf(problem, action.name)))
+              .finally(() => setBusy(null))
+            return
+          }
           if (host) { setError(null); setAiHint(null); setEditError(null); setEditing(Object.assign({}, host)) }
         }
 
@@ -404,6 +460,7 @@ window.__ModuleLoader__.load({
           // Only our own tunnel counts. A listener we did not create (a leftover
           // ssh from an earlier DSH run) must not look connected — it cannot be closed.
           const connected = live.connected || host.connected
+          const phase = connected ? (live.service === false ? 'degraded' : 'ready') : 'idle'
           return h('div', {
             key: host.name,
             style: {
@@ -412,10 +469,10 @@ window.__ModuleLoader__.load({
             },
           },
             h('span', {
-              title: connected ? tt('state.connected') : '',
+              title: phase === 'ready' ? tt('state.ready') : phase === 'degraded' ? tt('state.degraded') : tt('state.idle'),
               style: {
                 width: '0.5em', height: '0.5em', borderRadius: 999, flex: 'none',
-                background: connected ? '#30a46c' : 'rgba(127,127,127,0.32)',
+                background: phase === 'ready' ? '#30a46c' : phase === 'degraded' ? '#f5a524' : 'rgba(127,127,127,0.32)',
               },
             }),
             h('div', { style: { minWidth: 0, flex: 1 } },
@@ -424,6 +481,7 @@ window.__ModuleLoader__.load({
               }, target),
               h('div', { style: Object.assign({ fontSize: '0.76em', marginTop: '0.25em' }, SURFACE.dim) },
                 `127.0.0.1:${host.localPort} → :${host.remotePort}`,
+                phase === 'degraded' ? ` · ${tt('state.degraded')}` : null,
               ),
             ),
             textButton(
@@ -469,7 +527,7 @@ window.__ModuleLoader__.load({
           notice ? banner(notice, 'var(--dsh-accent, #4c8dff)') : null,
           showSettings && SettingsComponent ? settingsModal() : null,
           body,
-          h('div', { style: Object.assign({ fontSize: '0.7em', marginTop: '1.618em', opacity: 0.6 }, SURFACE.dim) }, 'build 0.4.0'),
+          h('div', { style: Object.assign({ fontSize: '0.7em', marginTop: '1.618em', opacity: 0.6 }, SURFACE.dim) }, 'build 0.6.0'),
           adding ? addModal() : null,
           editing ? editModal() : null,
           authPrompt ? passwordModal() : null,
@@ -655,6 +713,14 @@ window.__ModuleLoader__.load({
                   onChange: (event) => setEditing(Object.assign({}, editing, { token: event.target.value })),
                 }),
               ),
+              h('div', { style: { marginTop: '0.7em' } },
+                h('div', { style: Object.assign({ fontSize: '0.78em', marginBottom: '0.25em' }, SURFACE.dim) }, tt('edit.startCommand')),
+                h('input', {
+                  style: inputStyle, value: editing.startCommand || '', placeholder: tt('edit.startCommandPlaceholder'),
+                  onChange: (event) => setEditing(Object.assign({}, editing, { startCommand: event.target.value })),
+                }),
+                h('div', { style: Object.assign({ fontSize: '0.74em', marginTop: '0.25em' }, SURFACE.dim) }, tt('edit.startCommandHint')),
+              ),
               editError ? h('div', { style: { fontSize: '0.78em', color: '#e5484d', marginTop: '0.7em' } }, editError) : null,
               h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5em', marginTop: '1.1em' } },
                 textButton(tt('action.save'), () => {
@@ -672,6 +738,7 @@ window.__ModuleLoader__.load({
                     remotePort,
                     localPort,
                     token: editing.token || undefined,
+                    startCommand: editing.startCommand ? String(editing.startCommand).trim() : undefined,
                   })
                   save(hosts.map((item) => (item.name === entry.name ? entry : item))).then(() => setEditing(null))
                 }, { style: { borderColor: 'var(--dsh-accent, #4c8dff)', color: 'var(--dsh-accent, #4c8dff)' } }),
@@ -755,6 +822,22 @@ window.__ModuleLoader__.load({
               onChange: (event) => { setSaved(false); setDraft(Object.assign({}, draft, { defaultRemotePort: event.target.value })) },
             })),
           ),
+          h('label', { style: { display: 'flex', alignItems: 'center', gap: '0.5em', marginBottom: '0.4em', fontSize: '0.82em' } },
+            h('input', {
+              type: 'checkbox', checked: draft.autoStart === true,
+              onChange: (event) => { setSaved(false); setDraft(Object.assign({}, draft, { autoStart: event.target.checked })) },
+            }),
+            tt('settings.autoStart'),
+          ),
+          h('div', { style: Object.assign({ fontSize: '0.74em', marginBottom: '1.2em' }, SURFACE.dim) }, tt('settings.autoStartHint')),
+          h('label', { style: { display: 'flex', alignItems: 'center', gap: '0.5em', marginBottom: '0.4em', fontSize: '0.82em' } },
+            h('input', {
+              type: 'checkbox', checked: draft.stopRemoteOnDisconnect === true,
+              onChange: (event) => { setSaved(false); setDraft(Object.assign({}, draft, { stopRemoteOnDisconnect: event.target.checked })) },
+            }),
+            tt('settings.stopRemote'),
+          ),
+          h('div', { style: Object.assign({ fontSize: '0.74em', marginBottom: '1.2em' }, SURFACE.dim) }, tt('settings.stopRemoteHint')),
           h('div', { style: Object.assign({ fontSize: '0.76em', marginBottom: '1.2em' }, SURFACE.dim) }, tt('settings.hint')),
           h('div', { style: { display: 'flex', gap: '0.5em', alignItems: 'center' } },
             textButton(tt('action.save'), () => api('/settings', { method: 'POST', body: JSON.stringify(draft) })

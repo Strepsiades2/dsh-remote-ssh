@@ -20,7 +20,7 @@ export const inject = ['connection', 'skills']
  * `Config` export: a linked development bundle cannot resolve extra runtime
  * dependencies, and a JSON file keeps this package dependency-free.
  */
-let settings = { sshConfigPath: '', defaultRemotePort: 3000 }
+let settings = { sshConfigPath: '', defaultRemotePort: 3000, autoStart: false, stopRemoteOnDisconnect: false }
 
 const BASE = '/api/remote-ssh'
 const DSH_HOME = process.env.DSH_HOME || join(homedir(), '.dsh')
@@ -378,6 +378,89 @@ function waitForClose(child, timeoutMs = 1500) {
 }
 
 /**
+ * Fixed launch script used when the host has no custom start command. It resolves
+ * whichever install exists instead of assuming one path, and detaches so the
+ * process survives the SSH session.
+ */
+function defaultStartScript(port) {
+  return [
+    'PATH="$HOME/.local/opt/current/bin:$PATH";',
+    'if command -v dsh >/dev/null 2>&1; then BIN=dsh;',
+    'elif [ -x "$HOME/.local/dsh/node_modules/.bin/dsh" ]; then BIN="$HOME/.local/dsh/node_modules/.bin/dsh";',
+    'else echo NO_DSH; exit 127; fi;',
+    `if command -v setsid >/dev/null 2>&1; then nohup setsid "$BIN" web --host 127.0.0.1 --port ${port} --no-open </dev/null > ~/.dsh-web.log 2>&1 &`,
+    'else nohup "$BIN" web --host 127.0.0.1 --port ' + port + ' --no-open </dev/null > ~/.dsh-web.log 2>&1 & fi;',
+    'echo STARTED',
+  ].join(' ')
+}
+
+/** The command to run for this host: its own template, or the built-in script. */
+function startCommandFor(host) {
+  const port = String(Number(host.remotePort ?? settings.defaultRemotePort))
+  if (host.startCommand) return String(host.startCommand).replace(/\{port\}/g, port)
+  return defaultStartScript(port)
+}
+
+/** Ask the remote to launch dsh web; resolves with what ssh reported. */
+async function startRemote(host, password) {
+  const destination = safeDestination(host)
+  if (!destination) return { ok: false, reason: 'invalid ssh destination' }
+  const result = await run(
+    'ssh',
+    baseArgs(host, password).concat([destination, startCommandFor(host)]),
+    25000,
+    password ? passwordEnv(password) : null,
+  )
+  const out = `${result.stdout}\n${result.stderr}`
+  if (/NO_DSH/.test(out)) return { ok: false, reason: 'no-dsh' }
+  if (result.code !== 0) return { ok: false, reason: out.trim().slice(-400) || `ssh exit ${result.code}` }
+  return { ok: true }
+}
+
+/**
+ * Stop the remote dsh web listening on this host's DSH port. Only the listener on
+ * that port is signalled; nothing else on the machine is touched.
+ */
+async function stopRemote(host) {
+  const destination = safeDestination(host)
+  if (!destination) return { ok: false, reason: 'invalid destination' }
+  const port = Number(host.remotePort ?? settings.defaultRemotePort)
+  const script = [
+    `PIDS=$(ss -ltnp 2>/dev/null | grep -E ":${port}\\b" | grep -oE "pid=[0-9]+" | cut -d= -f2 | sort -u);`,
+    '[ -z "$PIDS" ] && { echo NOT_RUNNING; exit 0; };',
+    'kill -TERM $PIDS 2>/dev/null; sleep 1;',
+    `if ss -ltn 2>/dev/null | grep -qE ":${port}\\b"; then kill -KILL $PIDS 2>/dev/null; echo KILLED; else echo STOPPED; fi`,
+  ].join(' ')
+  const result = await run('ssh', baseArgs(host).concat([destination, script]), 20000)
+  const out = `${result.stdout} ${result.stderr}`.trim()
+  if (result.code !== 0) return { ok: false, reason: out.slice(-300) || `ssh exit ${result.code}` }
+  if (/NOT_RUNNING/.test(out)) return { ok: true, state: 'not-running' }
+  if (/KILLED/.test(out)) return { ok: true, state: 'killed' }
+  return { ok: true, state: 'stopped' }
+}
+
+/**
+ * Kill leftover ssh processes forwarding this exact local port. Matched narrowly
+ * (ssh + our -L form + ExitOnForwardFailure) so no other tool's session is hit.
+ */
+async function cleanupLocalPort(localPort, remotePort) {
+  const result = await run('ps', ['-eo', 'pid=,args='], 8000)
+  const needle = `-L ${localPort}:127.0.0.1:${remotePort}`
+  const pids = []
+  for (const line of result.stdout.split('\n')) {
+    if (!line.includes(needle) || !line.includes('ExitOnForwardFailure=yes') || !/ssh/.test(line)) continue
+    const pid = Number(line.trim().split(/\s+/)[0])
+    if (Number.isInteger(pid) && pid > 0) pids.push(pid)
+  }
+  for (const pid of pids) { try { process.kill(pid, 'SIGTERM') } catch {} }
+  await new Promise((resolve) => setTimeout(resolve, 600))
+  for (const pid of pids) {
+    try { process.kill(pid, 0); process.kill(pid, 'SIGKILL') } catch {}
+  }
+  return { killed: pids, listening: await probePort(localPort) }
+}
+
+/**
  * Turn ssh's own words into the next action: the three failure classes look alike
  * in the UI but need completely different fixes.
  */
@@ -416,6 +499,7 @@ const ROUTES = [
   ['/api/remote-ssh/close', ['POST']],
   ['/api/remote-ssh/settings', ['GET', 'POST']],
   ['/api/remote-ssh/reveal-config', ['POST']],
+  ['/api/remote-ssh/cleanup-port', ['POST']],
 ]
 
 function jsonResponse(status, payload) {
@@ -469,6 +553,7 @@ async function handleFetch(request) {
         remotePort: Number(host.remotePort ?? settings.defaultRemotePort),
         localPort: host.localPort ? Number(host.localPort) : undefined,
         token: host.token ? String(host.token) : undefined,
+        startCommand: host.startCommand ? String(host.startCommand) : undefined,
       }))
       const current = await loadConfig()
       await saveConfig({ settings: current.settings, hosts: cleaned })
@@ -495,10 +580,15 @@ async function handleFetch(request) {
       const config = await loadConfig()
       const status = await Promise.all(config.hosts.map(async (host, index) => {
         const localPort = assignLocalPort(config, host, index)
+        const connected = tunnels.has(host.name)
+        const listening = await probePort(localPort)
         return {
           name: host.name,
-          connected: tunnels.has(host.name),
-          listening: await probePort(localPort),
+          connected,
+          listening,
+          // Local HTTP through our own tunnel: cheap, and it separates "tunnel up but
+          // the remote service is dead" from a healthy connection.
+          service: connected && listening ? (await probeHttp(localPort, 1200)).ok : null,
           localPort,
         }
       }))
@@ -520,81 +610,116 @@ async function handleFetch(request) {
       }
       const localPort = assignLocalPort(config, host, index)
 
-      if (tunnels.has(host.name) && await probePort(localPort)) {
-        const token = await resolveToken(host, password)
-        return jsonResponse(200, {
-          url: token ? localUrl(localPort, token) : null,
-          hasToken: Boolean(token),
-          localPort,
-          reused: true,
-        })
-      }
+      let health = { ok: false }
+      const reusedTunnel = tunnels.has(host.name) && await probePort(localPort)
+      // Reuse only a tunnel that still serves the remote: a live tunnel pointing at a
+      // dead dsh web must fall through to the health/start handling below.
+      if (reusedTunnel) health = await probeHttp(localPort)
 
-      // A listener we do not own (leftover ssh from an earlier DSH run) makes every
-      // "is the port up" check lie, so refuse early with the real explanation.
-      if (await probePort(localPort)) {
-        return jsonResponse(409, {
-          error: '本地端口已被其它进程占用',
-          code: 'PORT_BUSY',
-          detail: `127.0.0.1:${localPort}`,
-          hint: `这个端口在监听，但不是本插件建立的隧道（多半是上次 DSH 退出后遗留的 ssh）。清理它：lsof -ti tcp:${localPort} | xargs kill，或在编辑里换一个本地端口。`,
-          action: { kind: 'edit', name: host.name },
-        })
-      }
-
-      const tunnel = openTunnel(host, localPort, password)
-      let listening = false
-      for (let attempt = 0; attempt < 16; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 250))
-        if (tunnel.child.exitCode !== null) break
-        if (await probePort(localPort, 300)) { listening = true; break }
-      }
-      if (listening) {
-        // Give ssh a moment: a port that answers for a few hundred ms and then dies
-        // is a failed forward, not a working tunnel.
-        await new Promise((resolve) => setTimeout(resolve, 300))
-        if (tunnel.child.exitCode !== null) listening = false
-      }
-      if (!listening) {
-        await waitForClose(tunnel.child)
-        try { tunnel.child.kill() } catch {}
-        tunnels.delete(host.name)
-        const stderr = tunnel.getStderr().trim()
-        if (isAuthFailure(stderr)) {
-          return jsonResponse(401, password
-            ? {
-                error: '密码认证失败',
-                code: 'AUTH_REJECTED',
-                detail: stderr,
-                hint: '密码可能不正确；也可能这台主机还要求其它因素（如 OTP）。不保存密码，可重试。',
-                action: { kind: 'password', name: host.name },
-              }
-            : {
-                error: '这台主机需要密码认证',
-                code: 'AUTH_REQUIRED',
-                detail: stderr,
-                hint: '输入密码即可继续：密码只用于本次连接，不会保存到任何文件。',
-                action: { kind: 'password', name: host.name },
-              })
+      if (!reusedTunnel) {
+        // A listener we do not own (leftover ssh from an earlier DSH run) makes every
+        // "is the port up" check lie, so refuse early with the real explanation.
+        if (await probePort(localPort)) {
+          return jsonResponse(409, {
+            error: '本地端口已被其它进程占用',
+            code: 'PORT_BUSY',
+            detail: `127.0.0.1:${localPort}`,
+            hint: '这个端口在监听，但不是本插件建立的隧道（多半是上次 DSH 退出后遗留的 ssh）。可以让插件清理它，或在编辑里换一个本地端口。',
+            actions: [
+              { kind: 'cleanup', name: host.name },
+              { kind: 'edit', name: host.name },
+            ],
+          })
         }
-        return jsonResponse(502, {
-          error: 'SSH 本地转发未能建立',
-          code: 'TUNNEL_FAILED',
-          detail: stderr || `no listener on 127.0.0.1:${localPort}`,
-          hint: sshFailureHint(stderr, destinationOf(host), localPort),
-          action: { kind: 'edit', name: host.name },
-        })
+
+        const tunnel = openTunnel(host, localPort, password)
+        let listening = false
+        for (let attempt = 0; attempt < 16; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 250))
+          if (tunnel.child.exitCode !== null) break
+          if (await probePort(localPort, 300)) { listening = true; break }
+        }
+        if (listening) {
+          // Give ssh a moment: a port that answers for a few hundred ms and then dies
+          // is a failed forward, not a working tunnel.
+          await new Promise((resolve) => setTimeout(resolve, 300))
+          if (tunnel.child.exitCode !== null) listening = false
+        }
+        if (!listening) {
+          await waitForClose(tunnel.child)
+          try { tunnel.child.kill() } catch {}
+          tunnels.delete(host.name)
+          const stderr = tunnel.getStderr().trim()
+          if (isAuthFailure(stderr)) {
+            return jsonResponse(401, password
+              ? {
+                  error: '密码认证失败',
+                  code: 'AUTH_REJECTED',
+                  detail: stderr,
+                  hint: '密码可能不正确；也可能这台主机还要求其它因素（如 OTP）。不保存密码，可重试。',
+                  action: { kind: 'password', name: host.name },
+                }
+              : {
+                  error: '这台主机需要密码认证',
+                  code: 'AUTH_REQUIRED',
+                  detail: stderr,
+                  hint: '输入密码即可继续：密码只用于本次连接，不会保存到任何文件。',
+                  action: { kind: 'password', name: host.name },
+                })
+          }
+          return jsonResponse(502, {
+            error: 'SSH 本地转发未能建立',
+            code: 'TUNNEL_FAILED',
+            detail: stderr || `no listener on 127.0.0.1:${localPort}`,
+            hint: sshFailureHint(stderr, destinationOf(host), localPort),
+            action: { kind: 'edit', name: host.name },
+          })
+        }
       }
 
-      const health = await probeHttp(localPort)
+      if (!reusedTunnel) health = await probeHttp(localPort)
       if (!health.ok) {
-        return jsonResponse(502, {
-          error: '隧道通了，但远端 dsh web 没有响应',
-          code: 'REMOTE_NOT_RUNNING',
-          detail: health.reason,
-          hint: `在远端启动它：PATH="$HOME/.local/opt/current/bin:$PATH" nohup setsid ~/.local/dsh/node_modules/.bin/dsh web --host 127.0.0.1 --port ${host.remotePort} --no-open </dev/null > ~/.dsh-web.log 2>&1 &`,
-          action: { kind: 'ai', name: host.name },
-        })
+        const wanted = body.start === true || settings.autoStart === true
+        if (!wanted) {
+          return jsonResponse(502, {
+            error: '隧道通了，但远端 dsh web 没有响应',
+            code: 'REMOTE_NOT_RUNNING',
+            detail: health.reason,
+            hint: '可以让插件替你在远端启动它，最多等待 30 秒就绪；失败会给出具体原因。',
+            actions: [
+              { kind: 'start', name: host.name },
+              { kind: 'ai', name: host.name },
+            ],
+          })
+        }
+
+        const started = await startRemote(host, password)
+        if (!started.ok) {
+          return jsonResponse(502, {
+            error: '远端启动失败',
+            code: started.reason === 'no-dsh' ? 'NO_DSH' : 'START_FAILED',
+            detail: started.reason,
+            hint: started.reason === 'no-dsh'
+              ? '远端找不到 dsh（PATH 和 ~/.local/dsh 都没有）。先在远端安装，或让 AI 帮你准备。'
+              : `启动命令执行失败：${started.reason}`,
+            actions: [{ kind: 'ai', name: host.name }],
+          })
+        }
+
+        for (let attempt = 0; attempt < 30; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+          health = await probeHttp(localPort, 1500)
+          if (health.ok) break
+        }
+        if (!health.ok) {
+          return jsonResponse(504, {
+            error: '已启动，但 30 秒内没有就绪',
+            code: 'START_TIMEOUT',
+            detail: health.reason,
+            hint: '可能启动较慢或启动失败。查看远端日志：tail -n 20 ~/.dsh-web.log；或让 AI 介入排查。',
+            actions: [{ kind: 'ai', name: host.name }],
+          })
+        }
       }
 
       const token = await resolveToken(host, password)
@@ -623,11 +748,33 @@ async function handleFetch(request) {
     }
 
     if (method === 'POST' && route === '/close') {
+      const config = await loadConfig()
+      const host = config.hosts.find((item) => item.name === body.name)
       const child = tunnels.get(body.name)
-      if (!child) return jsonResponse(200, { ok: true, closed: false })
-      try { child.kill() } catch {}
-      tunnels.delete(body.name)
-      return jsonResponse(200, { ok: true, closed: true })
+      const closed = Boolean(child)
+      if (child) {
+        try { child.kill() } catch {}
+        tunnels.delete(body.name)
+      }
+      // Stopping the remote service is a side effect on the other machine, so it
+      // only happens when the user turned that setting on.
+      const stop = settings.stopRemoteOnDisconnect === true && host ? await stopRemote(host) : null
+      return jsonResponse(200, { ok: true, closed, stopped: stop })
+    }
+
+    if (method === 'POST' && route === '/cleanup-port') {
+      const config = await loadConfig()
+      const index = config.hosts.findIndex((item) => item.name === body.name)
+      if (index < 0) return jsonResponse(404, { error: `unknown host: ${body.name}` })
+      const host = { ...config.hosts[index], remotePort: config.hosts[index].remotePort ?? settings.defaultRemotePort }
+      const localPort = assignLocalPort(config, host, index)
+      const result = await cleanupLocalPort(localPort, host.remotePort)
+      return jsonResponse(200, {
+        ok: true,
+        killed: result.killed,
+        listening: result.listening,
+        hint: result.listening ? '端口仍被占用，可能是别的程序；请在编辑里换一个本地端口。' : null,
+      })
     }
 
     if (method === 'GET' && route === '/settings') {
@@ -638,6 +785,8 @@ async function handleFetch(request) {
       settings = {
         sshConfigPath: String(body.sshConfigPath || '').trim(),
         defaultRemotePort: Number(body.defaultRemotePort || 3000),
+        autoStart: body.autoStart === true,
+        stopRemoteOnDisconnect: body.stopRemoteOnDisconnect === true,
       }
       const current = await loadConfig()
       await saveConfig({ settings, hosts: current.hosts })
@@ -698,6 +847,8 @@ export function apply(ctx, config) {
       settings = {
         sshConfigPath: String(stored.settings.sshConfigPath || ''),
         defaultRemotePort: Number(stored.settings.defaultRemotePort || 3000),
+        autoStart: stored.settings.autoStart === true,
+        stopRemoteOnDisconnect: stored.settings.stopRemoteOnDisconnect === true,
       }
     }
   }).catch(() => {})

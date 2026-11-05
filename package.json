@@ -1,6 +1,6 @@
 {
   "name": "@strepsiades/dsh-remote-ssh",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "private": false,
   "description": "SSH remote hosts for DeepSeek Harness: pick a host from ~/.ssh/config, keep an \"SSH local forward, and open its DSH web UI in the browser.",
   "type": "module",
