@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "远程 SSH",
+    "description": "维护一个运行 DeepSeek Harness 的机器列表，一键建立 SSH 本地端口转发，直接打开它的 web 界面。"
+  }
+}

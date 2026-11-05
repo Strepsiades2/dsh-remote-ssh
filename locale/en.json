@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Remote SSH",
+    "description": "Keep a list of machines that run DeepSeek Harness, open an SSH local forward to one, and jump straight into its web UI."
+  }
+}

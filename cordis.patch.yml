@@ -1,0 +1,4 @@
+- insert:
+    - id: remote-ssh
+      name: '@strepsiades/dsh-remote-ssh'
+      config: {}
