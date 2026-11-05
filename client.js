@@ -35,6 +35,7 @@ window.__ModuleLoader__.load({
         'state.ready': 'Ready',
         'state.degraded': 'Service not responding',
         'state.idle': 'Idle',
+        'state.checking': 'Checking…',
         'notice.portCleaned': 'Occupied port cleaned',
         'notice.portStillBusy': 'Port is still in use by another program',
         'notice.stoppedRemote': 'Forward closed and remote DSH stopped',
@@ -108,6 +109,7 @@ window.__ModuleLoader__.load({
         'state.ready': '已就绪',
         'state.degraded': '服务未响应',
         'state.idle': '未连接',
+        'state.checking': '检测中',
         'notice.portCleaned': '已清理被占用的端口',
         'notice.portStillBusy': '端口仍被其它程序占用',
         'notice.stoppedRemote': '已断开转发，并停止远端 DSH',
@@ -465,7 +467,15 @@ window.__ModuleLoader__.load({
           // Only our own tunnel counts. A listener we did not create (a leftover
           // ssh from an earlier DSH run) must not look connected — it cannot be closed.
           const connected = live.connected || host.connected
-          const phase = connected ? (live.service === false ? 'degraded' : 'ready') : 'idle'
+          const phase = connected
+            ? (live.service === true ? 'ready' : live.service === false ? 'degraded' : 'checking')
+            : 'idle'
+          const phaseText = {
+            idle: tt('state.idle'),
+            checking: tt('state.checking'),
+            degraded: tt('state.degraded'),
+            ready: tt('state.ready'),
+          }[phase]
           return h('div', {
             key: host.name,
             style: {
@@ -474,10 +484,13 @@ window.__ModuleLoader__.load({
             },
           },
             h('span', {
-              title: phase === 'ready' ? tt('state.ready') : phase === 'degraded' ? tt('state.degraded') : tt('state.idle'),
+              title: phaseText,
               style: {
                 width: '0.5em', height: '0.5em', borderRadius: 999, flex: 'none',
-                background: phase === 'ready' ? '#30a46c' : phase === 'degraded' ? '#f5a524' : 'rgba(127,127,127,0.32)',
+                background: phase === 'ready' ? '#30a46c'
+                  : phase === 'degraded' ? '#f5a524'
+                    : phase === 'checking' ? '#9aa4b2'
+                      : 'rgba(127,127,127,0.32)',
               },
             }),
             h('div', { style: { minWidth: 0, flex: 1 } },
@@ -486,7 +499,7 @@ window.__ModuleLoader__.load({
               }, target),
               h('div', { style: Object.assign({ fontSize: '0.76em', marginTop: '0.25em' }, SURFACE.dim) },
                 `127.0.0.1:${host.localPort} → :${host.remotePort}`,
-                phase === 'degraded' ? ` · ${tt('state.degraded')}` : null,
+                phase === 'degraded' || phase === 'checking' ? ` · ${phaseText}` : null,
               ),
             ),
             iconButton(
@@ -533,7 +546,7 @@ window.__ModuleLoader__.load({
           notice ? banner(notice, 'var(--dsh-accent, #4c8dff)') : null,
           showSettings && SettingsComponent ? settingsModal() : null,
           body,
-          h('div', { style: Object.assign({ fontSize: '0.7em', marginTop: '1.618em', opacity: 0.6 }, SURFACE.dim) }, 'build 0.6.3'),
+          h('div', { style: Object.assign({ fontSize: '0.7em', marginTop: '1.618em', opacity: 0.6 }, SURFACE.dim) }, 'build 0.6.4'),
           adding ? addModal() : null,
           editing ? editModal() : null,
           authPrompt ? passwordModal() : null,

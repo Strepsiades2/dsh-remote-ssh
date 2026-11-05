@@ -418,6 +418,14 @@ async function startRemote(host, password) {
 }
 
 /**
+ * A DSH web answers `/` with 401 when the request carries no session. Any other
+ * status means something else owns that port (a dev server, Gitea, a proxy…).
+ */
+function isDsh(health) {
+  return Boolean(health && health.ok && health.status === 401)
+}
+
+/**
  * Stop the remote dsh web listening on this host's DSH port. Only the listener on
  * that port is signalled; nothing else on the machine is touched.
  */
@@ -588,7 +596,7 @@ async function handleFetch(request) {
           listening,
           // Local HTTP through our own tunnel: cheap, and it separates "tunnel up but
           // the remote service is dead" from a healthy connection.
-          service: connected && listening ? (await probeHttp(localPort, 1200)).ok : null,
+          service: connected && listening ? isDsh(await probeHttp(localPort, 1200)) : null,
           localPort,
         }
       }))
@@ -722,6 +730,19 @@ async function handleFetch(request) {
         }
       }
 
+      if (health.ok && !isDsh(health)) {
+        return jsonResponse(409, {
+          error: `端口 ${host.remotePort} 上响应的不是 DSH`,
+          code: 'NOT_DSH',
+          detail: `HTTP ${health.status}`,
+          hint: '这个端口被别的服务占用了（返回的不是 DSH 的 401）。确认 DSH 的端口，或让 AI 检查这台机器是否安装了 DSH。',
+          actions: [
+            { kind: 'ai', name: host.name },
+            { kind: 'edit', name: host.name },
+          ],
+        })
+      }
+
       const token = await resolveToken(host, password)
       if (token) {
         const check = await probeHttp(localPort, 2500, `/?token=${encodeURIComponent(token)}`)
@@ -743,7 +764,7 @@ async function handleFetch(request) {
         hint: token
           ? null
           : '转发已建立，但没找到 web token。可在远端执行 grep -m1 "dsh web:" ~/.dsh-web.log，或在本机编辑里手动填入。',
-        action: token ? null : { kind: 'edit', name: host.name },
+        action: token ? null : { kind: 'ai', name: host.name },
       })
     }
 
