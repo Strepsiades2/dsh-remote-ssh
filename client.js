@@ -32,6 +32,7 @@ window.__ModuleLoader__.load({
         'action.enterPassword': 'Enter password',
         'action.startRemote': 'Start remotely',
         'action.cleanupPort': 'Clean up port',
+        'action.restartRemote': 'Restart remote DSH',
         'state.ready': 'Ready',
         'state.degraded': 'Service not responding',
         'state.idle': 'Idle',
@@ -67,6 +68,7 @@ window.__ModuleLoader__.load({
         'notice.copied': 'Copied. Close this dialog, then paste it into the conversation on the left.',
         'notice.copyFailed': 'Automatic copy is unavailable — select the text below and copy it.',
         'notice.starting': 'Starting the remote DSH…',
+        'notice.restarting': 'Restarting the remote DSH…',
         'notice.noToken': 'Forward is up but no token file was found on the remote',
         'notice.opened': 'Connected',
         'edit.hint': 'Everything here is stored per host. Connection details stay in your SSH config.',
@@ -106,6 +108,7 @@ window.__ModuleLoader__.load({
         'action.enterPassword': '输入密码',
         'action.startRemote': '启动远端',
         'action.cleanupPort': '清理端口',
+        'action.restartRemote': '重启远端 DSH',
         'state.ready': '已就绪',
         'state.degraded': '服务未响应',
         'state.idle': '未连接',
@@ -141,6 +144,7 @@ window.__ModuleLoader__.load({
         'notice.copied': '已复制。关闭此对话框，粘贴到左侧对话里即可。',
         'notice.copyFailed': '无法自动复制，请手动选中下面的文本复制。',
         'notice.starting': '正在启动远端 DSH…',
+        'notice.restarting': '正在重启远端 DSH…',
         'notice.noToken': '转发已建立，但远端没有 token 文件',
         'notice.opened': '已连接',
         'edit.hint': '这里只保存每台主机自己的信息；连接参数仍在 SSH 配置里。',
@@ -360,6 +364,7 @@ window.__ModuleLoader__.load({
         const open = (name, password, options) => {
           setBusy(name); setNotice(null); setError(null)
           if (options && options.start) setNotice(tt('notice.starting'))
+          if (options && options.restart) setNotice(tt('notice.restarting'))
           requestUrl(name, password, options)
             .then((result) => {
               if (result.url) setNotice(`${tt('notice.opened')} · 127.0.0.1:${result.localPort}`)
@@ -374,6 +379,7 @@ window.__ModuleLoader__.load({
         const openBrowser = (name, password, options) => {
           setBusy(name); setError(null)
           if (options && options.start) setNotice(tt('notice.starting'))
+          if (options && options.restart) setNotice(tt('notice.restarting'))
           requestUrl(name, password, options)
             .then((result) => {
               if (result.url) window.open(result.url, '_blank', 'noopener')
@@ -423,8 +429,9 @@ window.__ModuleLoader__.load({
                     action.kind === 'ai' ? tt('action.ai')
                       : action.kind === 'password' ? tt('action.enterPassword')
                         : action.kind === 'start' ? tt('action.startRemote')
-                          : action.kind === 'cleanup' ? tt('action.cleanupPort')
-                            : tt('action.editHost'),
+                          : action.kind === 'restart' ? tt('action.restartRemote')
+                            : action.kind === 'cleanup' ? tt('action.cleanupPort')
+                              : tt('action.editHost'),
                     () => runErrorAction(action),
                     { style: { borderColor: tone, color: tone } },
                   )))
@@ -437,6 +444,7 @@ window.__ModuleLoader__.load({
           if (action.kind === 'ai') { copyText(prepPrompt(action.name || '')); return }
           if (action.kind === 'password') { setError(null); setAuthPrompt({ name: action.name, value: '', viaBrowser: Boolean(action.viaBrowser) }); return }
           if (action.kind === 'start') { setError(null); open(action.name, null, { start: true }); return }
+          if (action.kind === 'restart') { setError(null); open(action.name, null, { restart: true }); return }
           if (action.kind === 'cleanup') {
             setError(null)
             setBusy(action.name)
@@ -546,7 +554,7 @@ window.__ModuleLoader__.load({
           notice ? banner(notice, 'var(--dsh-accent, #4c8dff)') : null,
           showSettings && SettingsComponent ? settingsModal() : null,
           body,
-          h('div', { style: Object.assign({ fontSize: '0.7em', marginTop: '1.618em', opacity: 0.6 }, SURFACE.dim) }, 'build 0.6.7'),
+          h('div', { style: Object.assign({ fontSize: '0.7em', marginTop: '1.618em', opacity: 0.6 }, SURFACE.dim) }, 'build 0.7.0'),
           adding ? addModal() : null,
           editing ? editModal() : null,
           authPrompt ? passwordModal() : null,

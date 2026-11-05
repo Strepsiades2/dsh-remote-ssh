@@ -52,6 +52,8 @@ Reload DSH, then look for **Remote SSH** in the sidebar.
 
 If the tunnel is up but `dsh web` is not answering, the error offers **Start remotely**: the plugin runs a launch command on the remote, waits up to 30 seconds for it to become ready, and then continues opening the UI.
 
+If the token found in the log no longer matches the process that is actually running (usually because `dsh web` was started more than once), the error offers **Restart remote DSH**: it stops the listener on that port and starts a fresh process, which prints a matching token.
+
 The row also shows three states: **Idle** (no tunnel), **Service not responding** (tunnel up but the port is silent, or answers like something other than DSH) and **Ready**. A DSH web answers `GET /` with **401** when no session cookie is present; anything else on that port is reported as "not DSH" with an AI-assisted repair action. If a local port is held by a leftover ssh that is not ours, the error offers **Clean up port**, which matches only ssh processes carrying our exact forward and ends them; nothing else is touched.
 
 The default launch command resolves whichever install exists (`dsh` on `PATH`, else `~/.local/dsh/node_modules/.bin/dsh`), detaches with `setsid` when available, and logs to `~/.dsh-web.log`. A host may override it with its own command, where `{port}` is replaced by the remote DSH port.
@@ -160,6 +162,8 @@ dsh plugin add @strepsiades/dsh-remote-ssh
 ## 启动远端 DSH
 
 如果隧道已建立但 `dsh web` 没有响应，错误提示里会出现【启动远端】：插件在远端执行启动命令，最多等待 30 秒就绪，然后继续打开界面。
+
+如果日志里的 token 与正在运行的进程不匹配（通常是因为 `dsh web` 被启动过不止一次），错误里会出现【重启远端 DSH】：它会停掉监听该端口的进程并重新启动，从而得到一条匹配的新 token。
 
 行内状态分三种：**未连接**、**服务未响应**（隧道在，但端口没响应，或响应的不是 DSH）、**已就绪**。判定依据是：未带 cookie 的 `GET /` 必须返回 **401**；别的服务占了端口会明确报「不是 DSH」并给出【AI 帮我配】。如果本地端口被一条不属于本插件的 ssh 占着，错误里会出现【清理端口】——它只匹配带本插件同款转发参数的 ssh 进程，其他连接一律不碰。
 
