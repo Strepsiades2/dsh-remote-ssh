@@ -237,15 +237,20 @@ window.__ModuleLoader__.load({
       external: () => h('svg', iconProps, h('path', { d: 'M14 4h6v6M20 4l-8.5 8.5M18 14v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5' })),
       pencil: () => h('svg', iconProps, h('path', { d: 'M4 20h4L20 8l-4-4L4 16v4z' })),
       plug: () => h('svg', iconProps, h('path', { d: 'M9 3v6M15 3v6M7 9h10v3a5 5 0 0 1-10 0zM12 17v4' })),
+      power: () => h('svg', iconProps,
+        h('path', { d: 'M12 3v9' }),
+        h('path', { d: 'M6.3 6.3a8 8 0 1 0 11.4 0' })),
     }
 
     function iconButton(kind, title, onClick, opts) {
+      const disabled = Boolean(opts && opts.disabled)
       return h('button', {
-        type: 'button', title, 'aria-label': title, onClick,
+        type: 'button', title, 'aria-label': title, onClick, disabled,
         style: Object.assign({
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           width: '2em', height: '2em', padding: 0, borderRadius: 8,
-          border: SURFACE.border, background: 'transparent', color: 'inherit', cursor: 'pointer', flex: 'none',
+          border: SURFACE.border, background: 'transparent', color: 'inherit',
+          cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.45 : 1, flex: 'none',
         }, (opts && opts.style) || {}),
       }, h(icons[kind]))
     }
@@ -464,8 +469,8 @@ window.__ModuleLoader__.load({
           return h('div', {
             key: host.name,
             style: {
-              display: 'flex', alignItems: 'center', gap: '0.9em',
-              padding: '0.85em 1em', border: SURFACE.border, borderRadius: SURFACE.radius,
+              display: 'flex', alignItems: 'center', gap: '0.55em',
+              padding: '0.85em 1.15em', border: SURFACE.border, borderRadius: SURFACE.radius,
             },
           },
             h('span', {
@@ -484,7 +489,8 @@ window.__ModuleLoader__.load({
                 phase === 'degraded' ? ` · ${tt('state.degraded')}` : null,
               ),
             ),
-            textButton(
+            iconButton(
+              connected ? 'power' : 'plug',
               connected ? tt('action.disconnect') : busy === host.name ? tt('action.opening') : tt('action.open'),
               () => (connected ? disconnect(host.name) : open(host.name)),
               {
@@ -518,7 +524,7 @@ window.__ModuleLoader__.load({
 
         return h('div', {
           style: {
-            padding: '2.618em 2.2em 2em', maxWidth: '44em', margin: '0 auto',
+            padding: '2.618em 1.9em 2em', width: '100%', maxWidth: '58em', margin: '0 auto',
             height: '100%', overflow: 'auto', boxSizing: 'border-box', lineHeight: 1.55,
           },
         },
@@ -527,7 +533,7 @@ window.__ModuleLoader__.load({
           notice ? banner(notice, 'var(--dsh-accent, #4c8dff)') : null,
           showSettings && SettingsComponent ? settingsModal() : null,
           body,
-          h('div', { style: Object.assign({ fontSize: '0.7em', marginTop: '1.618em', opacity: 0.6 }, SURFACE.dim) }, 'build 0.6.0'),
+          h('div', { style: Object.assign({ fontSize: '0.7em', marginTop: '1.618em', opacity: 0.6 }, SURFACE.dim) }, 'build 0.6.2'),
           adding ? addModal() : null,
           editing ? editModal() : null,
           authPrompt ? passwordModal() : null,
