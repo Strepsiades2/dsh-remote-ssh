@@ -16,7 +16,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/strepsiades/dsh-remote-ssh.git"
+    "url": "git+https://github.com/Strepsiades2/dsh-remote-ssh.git"
+  },
+  "homepage": "https://github.com/Strepsiades2/dsh-remote-ssh#readme",
+  "bugs": {
+    "url": "https://github.com/Strepsiades2/dsh-remote-ssh/issues"
   },
   "publishConfig": {
     "access": "public"
