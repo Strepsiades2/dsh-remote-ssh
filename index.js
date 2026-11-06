@@ -28,6 +28,8 @@ const CONFIG_PATH = join(DSH_HOME, 'remote-ssh.json')
 const DEFAULT_SSH_CONFIG = join(homedir(), '.ssh', 'config')
 const IS_WINDOWS = process.platform === 'win32'
 const ASKPASS_PATH = join(homedir(), '.dsh', IS_WINDOWS ? 'dsh-askpass.cmd' : 'dsh-askpass.sh')
+// Override for non-standard installs (Windows OpenSSH, Homebrew paths) and for tests.
+const SSH_BIN = process.env.DSH_REMOTE_SSH_BIN || 'ssh'
 
 /**
  * ssh never stores a password we give it; it asks this helper whenever the server
@@ -251,10 +253,13 @@ function baseArgs(host, password) {
     '-o', password ? 'BatchMode=no' : 'BatchMode=yes',
     '-o', 'ConnectTimeout=8',
     '-o', 'StrictHostKeyChecking=accept-new',
+  ]
+  // Windows OpenSSH does not support connection multiplexing; passing it can fail.
+  if (!IS_WINDOWS) {
     // Reuse the user's own multiplexed session when their ~/.ssh/config defines one:
     // that is how password/MFA hosts work without ever prompting this process.
-    '-o', 'ControlMaster=auto',
-  ]
+    args.push('-o', 'ControlMaster=auto')
+  }
   if (password) {
     args.push('-o', 'NumberOfPasswordPrompts=1')
     args.push('-o', 'PreferredAuthentications=publickey,password,keyboard-interactive')
@@ -289,12 +294,15 @@ function openTunnel(host, localPort, password) {
     ['-N', '-o', 'ExitOnForwardFailure=yes', '-L', `${localPort}:127.0.0.1:${host.remotePort ?? 3000}`],
     [destinationOf(host)],
   )
-  const child = spawn('ssh', args, {
+  const child = spawn(SSH_BIN, args, {
     stdio: ['ignore', 'ignore', 'pipe'],
     env: password ? { ...process.env, ...passwordEnv(password) } : process.env,
   })
   let stderr = ''
   child.stderr.on('data', (chunk) => { stderr += chunk })
+  // A spawn failure (missing ssh binary) emits 'error'; without a listener it becomes
+  // an unhandled event and kills the request instead of reporting a clean failure.
+  child.on('error', (error) => { stderr += String(error) })
   child.on('close', () => { if (tunnels.get(host.name)?.child === child) tunnels.delete(host.name) })
   tunnels.set(host.name, { child, remotePort: Number(host.remotePort ?? settings.defaultRemotePort) })
   return { child, getStderr: () => stderr }
@@ -304,7 +312,7 @@ async function readRemoteUrl(host, password) {
   // ssh [options] destination command...  — the destination must come first.
   const destination = safeDestination(host)
   if (!destination) return null
-  const result = await run('ssh', baseArgs(host, password).concat([destination, 'cat', '~/.dsh-web.url']), 20000, password ? passwordEnv(password) : null)
+  const result = await run(SSH_BIN, baseArgs(host, password).concat([destination, 'cat', '~/.dsh-web.url']), 20000, password ? passwordEnv(password) : null)
   const match = result.stdout.match(/https?:\/\/[^\s"']+/)
   return match ? match[0] : null
 }
@@ -339,7 +347,7 @@ async function resolveToken(host, password) {
   if (!destination) return null
   const env = password ? passwordEnv(password) : null
 
-  const posix = await run('ssh', baseArgs(host, password).concat([destination, grep]), 20000, env)
+  const posix = await run(SSH_BIN, baseArgs(host, password).concat([destination, grep]), 20000, env)
   const fromPosix = tokenFrom(posix.stdout)
   if (fromPosix) return fromPosix
 
@@ -385,6 +393,8 @@ function waitForClose(child, timeoutMs = 1500) {
  */
 function defaultStartScript(port) {
   return [
+    // The log holds a live web token; keep it owner-only from the first byte.
+    'umask 077;',
     'PATH="$HOME/.local/opt/current/bin:$PATH";',
     'if command -v dsh >/dev/null 2>&1; then BIN=dsh;',
     'elif [ -x "$HOME/.local/dsh/node_modules/.bin/dsh" ]; then BIN="$HOME/.local/dsh/node_modules/.bin/dsh";',
@@ -419,6 +429,17 @@ async function startRemote(host, password) {
 }
 
 /**
+ * The AI action carries the error context so the agent looks in the right place:
+ * transport failures are local, a silent remote is a remote-preparation problem.
+ */
+function aiAction(scope, host, detail) {
+  const prompt = scope === 'local'
+    ? `我本机（运行 DSH 的电脑）通过 SSH 连接「${host}」失败：${String(detail || '').trim().slice(0, 400)}。请帮我排查本机的 ssh 客户端、配置与网络，不要改远端；必要时参考 remote-dsh-ops skill。`
+    : `用 remote-dsh-ops skill，把 SSH 别名 ${host} 这台机器准备成一台远程 DSH 主机。`
+  return { kind: 'ai', name: host, prompt }
+}
+
+/**
  * A DSH web answers `/` with 401 when the request carries no session. Any other
  * status means something else owns that port (a dev server, Gitea, a proxy…).
  */
@@ -440,7 +461,7 @@ async function stopRemote(host) {
     'kill -TERM $PIDS 2>/dev/null; sleep 1;',
     `if ss -ltn 2>/dev/null | grep -qE ":${port}\\b"; then kill -KILL $PIDS 2>/dev/null; echo KILLED; else echo STOPPED; fi`,
   ].join(' ')
-  const result = await run('ssh', baseArgs(host).concat([destination, script]), 20000)
+  const result = await run(SSH_BIN, baseArgs(host).concat([destination, script]), 20000)
   const out = `${result.stdout} ${result.stderr}`.trim()
   if (result.code !== 0) return { ok: false, reason: out.slice(-300) || `ssh exit ${result.code}` }
   if (/NOT_RUNNING/.test(out)) return { ok: true, state: 'not-running' }
@@ -574,6 +595,7 @@ async function openHost(body) {
             hint: '这个端口在监听，但不是本插件建立的隧道（多半是上次 DSH 退出后遗留的 ssh）。可以让插件清理它，或在编辑里换一个本地端口。',
             actions: [
               { kind: 'cleanup', name: host.name },
+              aiAction('local', host.name, '本地端口被非本插件的进程占用'),
               { kind: 'edit', name: host.name },
             ],
           })
@@ -597,6 +619,17 @@ async function openHost(body) {
           try { tunnel.child.kill() } catch {}
           tunnels.delete(host.name)
           const stderr = tunnel.getStderr().trim()
+          if (/ENOENT/.test(stderr) && /ssh/i.test(stderr)) {
+            return jsonResponse(502, {
+              error: '本机没有可用的 ssh 客户端',
+              code: 'SSH_MISSING',
+              detail: stderr,
+              hint: process.platform === 'win32'
+                ? '在 Windows 的「设置 → 应用 → 可选功能」里安装 OpenSSH Client，或让 AI 帮你确认安装方式。'
+                : '安装 openssh-client（Debian/Ubuntu: apt install openssh-client；macOS 自带 /usr/bin/ssh），或让 AI 帮你处理。',
+              actions: [aiAction('local', host.name, stderr), { kind: 'edit', name: host.name }],
+            })
+          }
           if (isAuthFailure(stderr)) {
             return jsonResponse(401, password
               ? {
@@ -619,7 +652,10 @@ async function openHost(body) {
             code: 'TUNNEL_FAILED',
             detail: stderr || `no listener on 127.0.0.1:${localPort}`,
             hint: sshFailureHint(stderr, destinationOf(host), localPort),
-            action: { kind: 'edit', name: host.name },
+            actions: [
+              aiAction('local', host.name, stderr || sshFailureHint(stderr, destinationOf(host), localPort)),
+              { kind: 'edit', name: host.name },
+            ],
           })
         }
       }
@@ -635,7 +671,7 @@ async function openHost(body) {
             hint: '可以让插件替你在远端启动它，最多等待 30 秒就绪；失败会给出具体原因。',
             actions: [
               { kind: 'start', name: host.name },
-              { kind: 'ai', name: host.name },
+              aiAction('remote', host.name, health.reason),
             ],
           })
         }
@@ -649,14 +685,16 @@ async function openHost(body) {
             hint: started.reason === 'no-dsh'
               ? '远端找不到 dsh（PATH 和 ~/.local/dsh 都没有）。先在远端安装，或让 AI 帮你准备。'
               : `启动命令执行失败：${started.reason}`,
-            actions: [{ kind: 'ai', name: host.name }],
+            actions: [aiAction('remote', host.name, started.reason)],
           })
         }
 
         for (let attempt = 0; attempt < 30; attempt += 1) {
           await new Promise((resolve) => setTimeout(resolve, 1000))
           health = await probeHttp(localPort, 1500)
-          if (health.ok) break
+          // Wait for a real DSH answer (401), not just any early HTTP response the
+          // process emits while its routes are still coming up.
+          if (isDsh(health)) break
         }
         if (!health.ok) {
           return jsonResponse(504, {
@@ -664,7 +702,7 @@ async function openHost(body) {
             code: 'START_TIMEOUT',
             detail: health.reason,
             hint: '可能启动较慢或启动失败。查看远端日志：tail -n 20 ~/.dsh-web.log；或让 AI 介入排查。',
-            actions: [{ kind: 'ai', name: host.name }],
+            actions: [aiAction('remote', host.name, '启动后 30 秒未就绪')],
           })
         }
       }
@@ -676,7 +714,7 @@ async function openHost(body) {
           detail: `HTTP ${health.status}`,
           hint: '这个端口被别的服务占用了（返回的不是 DSH 的 401）。确认 DSH 的端口，或让 AI 检查这台机器是否安装了 DSH。',
           actions: [
-            { kind: 'ai', name: host.name },
+            aiAction('remote', host.name, `端口 ${host.remotePort} 上不是 DSH（HTTP ${health.status}）`),
             { kind: 'edit', name: host.name },
           ],
         })
@@ -694,6 +732,7 @@ async function openHost(body) {
             hint: '日志里的 token 和正在运行的进程不匹配（通常是因为启动过不止一次）。重启远端 DSH 会得到一条新 token。',
             actions: [
               { kind: 'restart', name: host.name },
+              aiAction('remote', host.name, '日志 token 与运行进程不匹配'),
               { kind: 'edit', name: host.name },
             ],
           })
@@ -706,7 +745,7 @@ async function openHost(body) {
         hint: token
           ? null
           : '转发已建立，但没找到 web token。可在远端执行 grep -m1 "dsh web:" ~/.dsh-web.log，或在本机编辑里手动填入。',
-        action: token ? null : { kind: 'ai', name: host.name },
+        action: token ? null : aiAction('remote', host.name, '远端日志里没有 token'),
       })
 }
 
@@ -819,6 +858,14 @@ async function handleFetch(request) {
     }
 
     if (method === 'POST' && route === '/cleanup-port') {
+      if (IS_WINDOWS) {
+        return jsonResponse(501, {
+          error: 'Windows 上暂不支持自动清理端口',
+          code: 'UNSUPPORTED',
+          hint: '请在任务管理器里结束命令行中含该端口的 ssh 进程；或让 AI 帮你确认。',
+          actions: [aiAction('local', body.name, 'Windows 客户端清理端口')],
+        })
+      }
       const config = await loadConfig()
       const index = config.hosts.findIndex((item) => item.name === body.name)
       if (index < 0) return jsonResponse(404, { error: `unknown host: ${body.name}` })

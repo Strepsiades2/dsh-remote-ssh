@@ -441,7 +441,7 @@ window.__ModuleLoader__.load({
 
         const runErrorAction = (action) => {
           const host = hosts.find((item) => item.name === action.name)
-          if (action.kind === 'ai') { copyText(prepPrompt(action.name || '')); return }
+          if (action.kind === 'ai') { copyText(action.prompt || prepPrompt(action.name || '')); return }
           if (action.kind === 'password') { setError(null); setAuthPrompt({ name: action.name, value: '', viaBrowser: Boolean(action.viaBrowser) }); return }
           if (action.kind === 'start') { setError(null); open(action.name, null, { start: true }); return }
           if (action.kind === 'restart') { setError(null); open(action.name, null, { restart: true }); return }
@@ -554,7 +554,7 @@ window.__ModuleLoader__.load({
           notice ? banner(notice, 'var(--dsh-accent, #4c8dff)') : null,
           showSettings && SettingsComponent ? settingsModal() : null,
           body,
-          h('div', { style: Object.assign({ fontSize: '0.7em', marginTop: '1.618em', opacity: 0.6 }, SURFACE.dim) }, 'build 0.7.0'),
+          h('div', { style: Object.assign({ fontSize: '0.7em', marginTop: '1.618em', opacity: 0.6 }, SURFACE.dim) }, 'build 0.7.4'),
           adding ? addModal() : null,
           editing ? editModal() : null,
           authPrompt ? passwordModal() : null,

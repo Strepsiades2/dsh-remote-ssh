@@ -83,6 +83,16 @@ The default launch command resolves whichever install exists (`dsh` on `PATH`, e
 - The plugin never reads or copies your private keys — which keys are used is up to `~/.ssh/config`
 - The browser cookie is issued by the remote `dsh web` and lasts 30 days by default
 
+## Platform support
+
+| | macOS | Linux | Windows |
+| --- | --- | --- | --- |
+| Plugin (client) — tunnel, token, browser | ✅ verified | ✅ | ⚠️ key auth only; password auth and port cleanup unsupported |
+| Remote host — token read | ✅ verified | ✅ verified | ⚠️ PowerShell fallback, unverified |
+| Remote host — start / stop DSH | ✅ verified | ✅ verified | ❌ commands are POSIX |
+
+On Windows the plugin omits `ControlMaster` (Windows OpenSSH has no multiplexing), uses a `.cmd` askpass helper for passwords (unverified), and rejects automatic port cleanup with an explicit message. Ending the leftover `ssh` process from Task Manager clears the port.
+
 ## Limitations
 
 - No reachability layer: reverse tunnels, Tailscale, frp and friends are out of scope
