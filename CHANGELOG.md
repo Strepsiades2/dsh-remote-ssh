@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.0
+
+- **传输层改为纯 JS 的 `ssh2`**：不再依赖系统 `ssh` 二进制，也不再需要 askpass / ControlMaster
+- 密码与 keyboard-interactive 认证在 macOS / Linux / Windows 走同一条代码路径（Windows 客户端不再需要特殊处理）
+- 隧道与读取 token 共用一条已认证连接，少一次握手；连接断开时本地监听自动关闭（不再产生僵尸端口）
+- 新增：`~/.ssh/config` 的 `Include` 展开；主机密钥 TOFU 记录到 `~/.dsh/ssh-known-hosts.json`
+- 已知缺口：`ProxyJump` / `ProxyCommand` 暂未实现，这类主机会被明确拒绝
+- `DSH_REMOTE_SSH_BIN` 与 askpass 相关代码移除
+- `package.json` 增加 `engines.dsh`
+
 ## 0.7.4
 
 - 修复：启动远端后只等“端口有响应”，DSH 启动瞬间的非 401 响应会被误判为「不是 DSH」。现在等到真正的 401
