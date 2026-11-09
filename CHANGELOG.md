@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.2
+
+- 改进：读取 web token 改走 **SFTP**，不再依赖远程 shell —— Windows 远端因此不需要 PowerShell、也不需要 `grep`/`cat`
+- 保留 shell 回退（POSIX 与 PowerShell 两版），用于未开 SFTP 子系统的服务器
+- README 平台矩阵更新：远端 token 读取现在三平台同一条代码路径
+
 ## 0.8.1
 
 - 新增：`ProxyJump` 支持（SSH over SSH）。先连跳板，再从跳板开 channel 到目标 22，第二层 SSH 跑在该 channel 上

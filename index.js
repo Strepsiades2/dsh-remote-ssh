@@ -245,16 +245,28 @@ function tokenFrom(text) {
 
 /** Legacy fallback: a remote that keeps its URL in ~/.dsh-web.url. */
 async function readRemoteUrl(host, password) {
-  const result = await transport.exec(host, settings, 'cat ~/.dsh-web.url 2>/dev/null', { password, timeoutMs: 15000 })
-  const match = result.stdout.match(/https?:\/\/[^\s"']+/)
-  return match ? match[0] : null
+  try {
+    const file = await transport.readRemoteFile(host, settings, ['~/.dsh-web.url'], { password })
+    if (!file) return null
+    const match = file.text.match(/https?:\/\/[^\s"']+/)
+    return match ? match[0] : null
+  } catch {
+    return null
+  }
 }
+
+/** Where `dsh web` may leave its token, relative to the remote home. */
+const TOKEN_FILES = ['~/.dsh-web.log', '~/.dsh/logs/web.log']
 
 /**
  * Resolve the per-process web token for a host, in order:
  *   1. the row's manually entered token
  *   2. a `~/.dsh-web.url` the remote happens to keep
  *   3. the `dsh web:` line in its log, matched by port and taking the newest
+ *
+ * Steps 2–3 read the file over SFTP, which needs no shell: the same code works on
+ * Linux, macOS and Windows remotes. A shell fallback remains for servers without an
+ * SFTP subsystem.
  */
 async function resolveToken(host, password) {
   if (host.token) return String(host.token)
@@ -263,15 +275,24 @@ async function resolveToken(host, password) {
   if (fromFile) return fromFile
 
   const port = Number(host.remotePort ?? settings.defaultRemotePort)
-  const pattern = `127.0.0.1:${port}/?token=`
+  const needle = `127.0.0.1:${port}/?token=`
+
+  try {
+    const log = await transport.readRemoteFile(host, settings, TOKEN_FILES, { password })
+    if (log) {
+      const lines = log.text.split(/\r?\n/).filter((line) => line.includes(needle))
+      if (lines.length > 0) return tokenFrom(lines[lines.length - 1])
+    }
+  } catch {}
+
+  // Fallback: shell commands for servers that do not expose SFTP.
   const posix = `for f in ~/.dsh-web.log ~/.dsh/logs/web.log; do `
-    + `[ -f "$f" ] && grep ${JSON.stringify(pattern)} "$f" | tail -1 && break; `
+    + `[ -f "$f" ] && grep ${JSON.stringify(needle)} "$f" | tail -1 && break; `
     + 'done'
   const viaPosix = await transport.exec(host, settings, posix, { password, timeoutMs: 20000 })
   const fromPosix = tokenFrom(viaPosix.stdout)
   if (fromPosix) return fromPosix
 
-  // Windows remotes have no sh: retry with an encoded PowerShell script.
   const viaWindows = await transport.exec(host, settings, powershellCommand(windowsTokenScript(port)), { password, timeoutMs: 25000 })
   return tokenFrom(viaWindows.stdout)
 }

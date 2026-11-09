@@ -398,6 +398,42 @@ export function exec(host, settings, command, { password, timeoutMs = 25000 } = 
   }))
 }
 
+/** Open an SFTP session on the cached connection. */
+function sftpSession(entry) {
+  return new Promise((resolve, reject) => {
+    entry.client.sftp((error, sftp) => (error ? reject(error) : resolve(sftp)))
+  })
+}
+
+/**
+ * Read a remote file over SFTP. This needs no shell at all, so the same code works
+ * on Linux, macOS and Windows remotes. `~` is resolved with the server's own home.
+ */
+export async function readRemoteFile(host, settings, candidates, { password } = {}) {
+  const entry = await connect(host, settings, { password })
+  const sftp = await sftpSession(entry)
+  try {
+    const home = await new Promise((resolve, reject) => {
+      sftp.realpath('.', (error, resolved) => (error ? reject(error) : resolve(resolved)))
+    })
+    const separator = home.includes('\\') ? '\\' : '/'
+    for (const candidate of candidates) {
+      const absolute = candidate.startsWith('~')
+        ? `${home}${separator}${candidate.slice(1).replace(/^[\\/]/, '').split(/[\\/]/).join(separator)}`
+        : candidate
+      try {
+        const buffer = await new Promise((resolve, reject) => {
+          sftp.readFile(absolute, (error, data) => (error ? reject(error) : resolve(data)))
+        })
+        return { path: absolute, text: buffer.toString('utf8') }
+      } catch {}
+    }
+    return null
+  } finally {
+    try { sftp.end() } catch {}
+  }
+}
+
 /** Local listener that forwards every accepted socket through the SSH connection. */
 export async function forward(host, settings, localPort, remotePort, { password } = {}) {
   const entry = await connect(host, settings, { password })
