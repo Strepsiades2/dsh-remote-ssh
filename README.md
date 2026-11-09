@@ -7,11 +7,13 @@ It is the DSH equivalent of VS Code Remote-SSH — same SSH config, same keys, s
 ## Features
 
 - **Hosts come from `~/.ssh/config`** — one source of truth, nothing to retype
-- **One click connect / disconnect** — runs `ssh -N -L <local>:127.0.0.1:<remote>`
+- **One click connect / disconnect** — opens a local forward to the remote DSH port over SSH
 - **Automatic web token** — reads the last matching line of the remote log (matched by port) and verifies it through the tunnel before you ever see a 401
 - **Actionable failures** — port in use, network unreachable, and authentication failure each get their own next step
 - **Password / MFA hosts** — a dialog asks for the password when needed; it is used for that connection only and never written to disk
-- Works with ProxyJump / ProxyCommand, passphrase keys via `ssh-agent`, and ControlMaster session reuse
+- Pure-JS SSH client (`ssh2`): no system `ssh` binary, no askpass helper — the same code runs on macOS, Linux and Windows
+- Password and keyboard-interactive authentication on every platform; keys via `IdentityFile` or an agent
+- The tunnel and the remote commands that read the token share one authenticated connection
 - Ships a `remote-dsh-ops` skill so an agent can turn a bare machine into a remote DSH host
 
 ## Install
@@ -34,8 +36,8 @@ Reload DSH, then look for **Remote SSH** in the sidebar.
 | Side | Requirement |
 | --- | --- |
 | DSH | `0.2.1-rc.5` or newer |
-| Local machine | OpenSSH client. macOS / Linux fully supported. Windows: key auth and tunneling work; password auth is untested |
-| Remote machine | macOS / Linux. A Windows remote is reached through a PowerShell token lookup that is untested |
+| Local machine | Anything Node runs on — macOS, Linux or Windows. **No SSH client is required**: SSH is implemented in-process |
+| Remote machine | An OpenSSH server on macOS / Linux. Windows can serve DSH, but the launch/stop commands sent to it are still POSIX |
 
 **The plugin does not provide reachability.** If the host is not already reachable over SSH (LAN, VPN, Tailscale, jump host), the connection fails — by design.
 
@@ -79,7 +81,7 @@ The default launch command resolves whichever install exists (`dsh` on `PATH`, e
 
 - Custom routes ride DSH's authenticated `/api` channel: Host / Origin checks and the owner principal are enforced by the connection layer before this plugin runs
 - SSH destinations starting with `-` are rejected, so a registry entry cannot smuggle an ssh option
-- Passwords reach ssh through `SSH_ASKPASS`: not on the command line, not in logs, not on disk
+- Passwords never touch a command line, a log, or the disk: they go to the in-process SSH client and are dropped after the attempt
 - The plugin never reads or copies your private keys — which keys are used is up to `~/.ssh/config`
 - The browser cookie is issued by the remote `dsh web` and lasts 30 days by default
 
@@ -87,11 +89,12 @@ The default launch command resolves whichever install exists (`dsh` on `PATH`, e
 
 | | macOS | Linux | Windows |
 | --- | --- | --- | --- |
-| Plugin (client) — tunnel, token, browser | ✅ verified | ✅ | ⚠️ key auth only; password auth and port cleanup unsupported |
-| Remote host — token read | ✅ verified | ✅ verified | ⚠️ PowerShell fallback, unverified |
-| Remote host — start / stop DSH | ✅ verified | ✅ verified | ❌ commands are POSIX |
+| Plugin (client): connect, token, browser | ✅ verified | ✅ | ✅ expected (same in-process code) |
+| Password / keyboard-interactive auth | ✅ verified | ✅ expected | ✅ expected |
+| Remote: token read | ✅ verified | ✅ verified | ⚠️ PowerShell fallback, unverified |
+| Remote: start / stop DSH | ✅ verified | ✅ verified | ❌ commands are POSIX |
 
-On Windows the plugin omits `ControlMaster` (Windows OpenSSH has no multiplexing), uses a `.cmd` askpass helper for passwords (unverified), and rejects automatic port cleanup with an explicit message. Ending the leftover `ssh` process from Task Manager clears the port.
+Known gaps: `ProxyJump` / `ProxyCommand` are not implemented by the in-process transport, so such hosts are refused with an explicit message. Host keys are learned trust-on-first-use into `~/.dsh/ssh-known-hosts.json`; a mismatch fails the connection until the stale entry is removed.
 
 ## Limitations
 
@@ -126,11 +129,13 @@ MIT © Strepsiades
 ## 功能
 
 - **主机列表直接来自 `~/.ssh/config`**，不重复维护连接信息
-- **一键连接 / 断开**：`ssh -N -L <本地>:127.0.0.1:<远端>`
+- **一键连接 / 断开**：通过 SSH 建立到远端 DSH 端口的本地转发
 - **自动读取 web token**：按端口取远端日志的最后一条匹配行，并通过隧道验证后再交给浏览器
 - **错误可操作**：端口占用、网络不通、认证失败分别给出下一步
 - **密码 / MFA 主机**：需要时弹窗输入，仅用于本次连接，不落盘
-- 支持 ProxyJump / ProxyCommand、`ssh-agent` 中的口令密钥、ControlMaster 会话复用
+- 纯 JS SSH 客户端（`ssh2`）：不依赖系统 `ssh`、不需要 askpass，macOS / Linux / Windows 同一套代码
+- 密码与 keyboard-interactive 认证全平台可用；密钥走 `IdentityFile` 或 agent
+- 隧道与读取 token 共用同一条已认证连接
 - 附带 `remote-dsh-ops` skill，可让 agent 把一台空机器准备成远程 DSH 主机
 
 ## 安装
@@ -146,8 +151,8 @@ dsh plugin add @strepsiades/dsh-remote-ssh
 ## 依赖
 
 - DSH `0.2.1-rc.5` 或更新
-- 本机：OpenSSH 客户端（macOS / Linux 完整支持；Windows 的密码认证未验证）
-- 远端：macOS / Linux（Windows 远端走 PowerShell 读 token，未验证）
+- 本机：能跑 Node 的系统即可——**不需要安装 SSH 客户端**（插件内置纯 JS 实现）
+- 远端：macOS / Linux 上运行 OpenSSH 服务端（Windows 可作服务端，但启动/停止命令仍是 POSIX）
 
 **本插件不提供可达性。** 如果这台机器本来就不能通过 SSH 到达（局域网、VPN、Tailscale、跳板机），连接会失败——这是刻意的边界。
 
@@ -183,9 +188,20 @@ dsh plugin add @strepsiades/dsh-remote-ssh
 
 - 自定义路由挂在 DSH 已鉴权的 `/api` 通道内，Host / Origin 校验与 owner 身份由 Connection 层完成
 - 拒绝以 `-` 开头的 SSH 目的地，避免参数注入
-- 密码经 `SSH_ASKPASS` 交给 ssh：不进命令行、不进日志、不落盘
+- 密码只交给进程内的 SSH 客户端：不进命令行、不进日志、不落盘
 - 插件不读取也不复制私钥，使用哪些密钥完全取决于 `~/.ssh/config`
 - 浏览器 cookie 由远端 `dsh web` 签发，默认 30 天
+
+## 平台支持
+
+| | macOS | Linux | Windows |
+| --- | --- | --- | --- |
+| 插件（客户端）：连接 / token / 浏览器 | ✅ 已验证 | ✅ | ✅ 预期可用（同一套进程内实现） |
+| 密码 / keyboard-interactive 认证 | ✅ 已验证 | ✅ 预期可用 | ✅ 预期可用 |
+| 远端：读取 token | ✅ 已验证 | ✅ 已验证 | ⚠️ 有 PowerShell 回退，未验证 |
+| 远端：启动 / 停止 DSH | ✅ 已验证 | ✅ 已验证 | ❌ 命令是 POSIX |
+
+已知缺口：进程内传输层尚未实现 `ProxyJump` / `ProxyCommand`，这类主机会被明确拒绝。主机密钥采用 TOFU，记录在 `~/.dsh/ssh-known-hosts.json`；不匹配时连接失败，需删除旧记录后重试。
 
 ## 许可
 

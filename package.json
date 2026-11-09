@@ -1,6 +1,6 @@
 {
   "name": "@strepsiades/dsh-remote-ssh",
-  "version": "0.7.4",
+  "version": "0.8.0",
   "private": false,
   "description": "SSH remote hosts for DeepSeek Harness: pick a host from ~/.ssh/config, keep an \"SSH local forward, and open its DSH web UI in the browser.",
   "author": "Strepsiades",
@@ -22,6 +22,9 @@
   "bugs": {
     "url": "https://github.com/Strepsiades2/dsh-remote-ssh/issues"
   },
+  "engines": {
+    "dsh": ">=0.2.1-rc.5 <0.3.0"
+  },
   "publishConfig": {
     "access": "public"
   },
@@ -35,6 +38,7 @@
   "files": [
     "index.js",
     "client.js",
+    "transport.js",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
@@ -43,6 +47,10 @@
     "CHANGELOG.md",
     "LICENSE"
   ],
+  "dependencies": {
+    "ssh2": "^1.17.0",
+    "ssh-config": "^5.3.0"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
