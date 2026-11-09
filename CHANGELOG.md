@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.1
+
+- 新增：`ProxyJump` 支持（SSH over SSH）。先连跳板，再从跳板开 channel 到目标 22，第二层 SSH 跑在该 channel 上
+- 跳板认证使用其自己的 `IdentityFile` / agent；弹窗密码只用于最终目标
+- 支持 `ProxyJump a,b` 形式的链（多跳代码已实现，实测覆盖单跳）；跳板自身再配 ProxyJump 会被明确拒绝
+- 关闭连接时一并关闭跳板链路
+
 ## 0.8.0
 
 - **传输层改为纯 JS 的 `ssh2`**：不再依赖系统 `ssh` 二进制，也不再需要 askpass / ControlMaster

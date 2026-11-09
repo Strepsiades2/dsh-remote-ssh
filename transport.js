@@ -93,37 +93,54 @@ function first(value) {
  * Merge a registry row with its `~/.ssh/config` entry. Registry-level `target`
  * (user@host) wins over the alias, and `sshPort`/`remotePort` stay separate.
  */
-export function resolveHost(host, settings) {
-  const destination = String(host.alias || host.target || '')
+/** Resolve a bare destination (`alias`, `user@host`, `host:port`) via ssh config. */
+export function resolveDestination(destination, settings) {
+  const dest = String(destination || '')
   let entry = {}
   try {
-    entry = loadConfigFile(settings && settings.sshConfigPath).compute(destination) || {}
+    entry = loadConfigFile(settings && settings.sshConfigPath).compute(dest) || {}
   } catch {
     entry = {}
   }
-  let hostname = first(entry.HostName) || destination
-  let user = first(entry.User)
+  let hostname = first(entry.HostName) || dest
+  let user = first(entry.User) || ''
   let port = Number(first(entry.Port)) || 22
   let identityFile = first(entry.IdentityFile)
 
-  const at = destination.indexOf('@')
-  if (host.target) {
-    if (at > 0) { user = destination.slice(0, at); hostname = destination.slice(at + 1) }
-    else if (destination) hostname = destination
+  const match = dest.match(/^(?:([^@]+)@)?(\[[^\]]+\]|[^:@]+)(?::(\d+))?$/)
+  if (match) {
+    if (match[1]) user = match[1]
+    if (!entry.HostName) hostname = match[2].replace(/^\[|\]$/g, '')
+    if (match[3]) port = Number(match[3])
   }
-  if (host.sshPort) port = Number(host.sshPort)
-  if (!user) user = process.env.USER || process.env.USERNAME || ''
-  if (identityFile && identityFile.startsWith('~')) {
-    identityFile = join(homedir(), identityFile.slice(1))
-  }
+  if (identityFile && identityFile.startsWith('~')) identityFile = join(homedir(), identityFile.slice(1))
   return {
-    destination,
+    destination: dest,
     hostname,
     user,
     port,
     identityFile: identityFile || null,
     proxyJump: first(entry.ProxyJump) || null,
   }
+}
+
+/**
+ * Merge a registry row with its `~/.ssh/config` entry. Registry-level `target`
+ * (user@host) wins over the alias, and `sshPort` overrides the config port.
+ */
+export function resolveHost(host, settings) {
+  const destination = String(host.alias || host.target || '')
+  const info = resolveDestination(destination, settings)
+  if (host.sshPort) info.port = Number(host.sshPort)
+  if (!info.user) info.user = process.env.USER || process.env.USERNAME || ''
+  return info
+}
+
+/** ProxyJump value -> hop list ("none" and empty mean direct). */
+function proxyHops(info) {
+  const raw = info.proxyJump ? String(info.proxyJump).trim() : ''
+  if (!raw || raw.toLowerCase() === 'none') return []
+  return raw.split(',').map((part) => part.trim()).filter(Boolean)
 }
 
 /* ------------------------------------------------------------ host keys */
@@ -246,7 +263,7 @@ function classify(error, info, hasPassword) {
   return new TransportError('TRANSPORT', message.split('\n')[0], null)
 }
 
-function connectOnce(info, password, timeoutMs = 20000) {
+function connectOnce(info, password, sock = null, timeoutMs = 20000) {
   return new Promise((resolve, reject) => {
     const client = new Client()
     const state = { hostKeyMismatch: false }
@@ -277,7 +294,9 @@ function connectOnce(info, password, timeoutMs = 20000) {
       finish(answers)
     })
     try {
-      client.connect(authOptions(info, password, state))
+      const options = authOptions(info, password, state)
+      if (sock) options.sock = sock
+      client.connect(options)
     } catch (error) {
       if (settled) return
       settled = true
@@ -287,27 +306,61 @@ function connectOnce(info, password, timeoutMs = 20000) {
   })
 }
 
+/** Open a direct-tcpip channel from an established client toward host:port. */
+function channelTo(client, hostname, port) {
+  return new Promise((resolve, reject) => {
+    client.forwardOut('127.0.0.1', 0, hostname, port, (error, stream) => {
+      if (error) reject(classify(error, { hostname, port }, false))
+      else resolve(stream)
+    })
+  })
+}
+
+/**
+ * Connect to a target, crossing ProxyJump hops when configured. Each hop is a full
+ * SSH connection made over a channel of the previous one (SSH over SSH), which is
+ * what OpenSSH's ProxyJump does as well.
+ */
+async function connectTarget(info, password, settings) {
+  const hops = proxyHops(info)
+  if (hops.length === 0) return { client: await connectOnce(info, password), upstream: [] }
+
+  const upstream = []
+  let sock = null
+  try {
+    for (let index = 0; index < hops.length; index += 1) {
+      const hopInfo = resolveDestination(hops[index], settings)
+      if (proxyHops(hopInfo).length > 0) {
+        throw new TransportError('UNSUPPORTED', '跳板机本身的 ProxyJump 暂不支持', '请简化 ~/.ssh/config 里的 ProxyJump 链。')
+      }
+      // Jump hosts authenticate with their own keys/agent; the password belongs to the target.
+      const hopClient = await connectOnce(hopInfo, null, sock)
+      upstream.push(hopClient)
+      const next = index + 1 < hops.length ? resolveDestination(hops[index + 1], settings) : info
+      sock = await channelTo(hopClient, next.hostname, next.port)
+    }
+    const client = await connectOnce(info, password, sock)
+    return { client, upstream }
+  } catch (error) {
+    for (const client of upstream) { try { client.end() } catch {} }
+    throw error
+  }
+}
+
 /**
  * One authenticated connection per host, reused by the forward and by remote
  * commands. Password-created connections are keyed separately so a later
  * key-based connect does not reuse a session the user did not authorise.
  */
 export async function connect(host, settings, { password } = {}) {
-  if (host.proxyJump) {
-    throw new TransportError(
-      'UNSUPPORTED',
-      'ProxyJump 暂不支持',
-      '这条主机在 ~/.ssh/config 里使用了 ProxyJump。请改用系统 ssh 后端，或先手动建立跳板。',
-    )
-  }
   const info = resolveHost(host, settings)
   if (!info.destination) throw new TransportError('INVALID', 'invalid ssh destination')
-  const cacheKey = `${host.name}|${info.hostname}|${info.port}|${info.user}|${password ? 'pw' : 'key'}`
+  const cacheKey = `${host.name}|${info.hostname}|${info.port}|${info.user}|${info.proxyJump || ''}|${password ? 'pw' : 'key'}`
   const existing = connections.get(host.name)
   if (existing && existing.cacheKey === cacheKey && existing.client) return existing
 
-  const client = await connectOnce(info, password)
-  const entry = { client, cacheKey, info, server: null, localPort: null }
+  const { client, upstream } = await connectTarget(info, password, settings)
+  const entry = { client, upstream, cacheKey, info, server: null, localPort: null }
   connections.set(host.name, entry)
   client.on('close', () => {
     // The socket died: the forward must die with it, or the port stays bound and the
@@ -389,6 +442,7 @@ export function close(name) {
   if (!entry) return false
   if (entry.server) { try { entry.server.close() } catch {} }
   try { entry.client.end() } catch {}
+  for (const upstream of entry.upstream || []) { try { upstream.end() } catch {} }
   connections.delete(name)
   return true
 }

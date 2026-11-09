@@ -567,7 +567,7 @@ async function openHost(body) {
     localPort,
     hint: token
       ? null
-      : '转发已建立，但没找到 web token。可在远端执行 grep -m1 "dsh web:" ~/.dsh-web.log，或在本机编辑里手动填入。',
+      : '转发已建立，但没找到 web token。先确认 dsh web 的日志位置（Linux/macOS: ~/.dsh-web.log；Windows: %USERPROFILE%\\.dsh-web.log），或在本机编辑里手动填入。',
     action: token ? null : aiAction('remote', host.name, '远端日志里没有 token'),
   })
 }
