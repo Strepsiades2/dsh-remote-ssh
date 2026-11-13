@@ -21,13 +21,7 @@ It is the DSH equivalent of VS Code Remote-SSH — same SSH config, same keys, s
 
 ## Install
 
-```bash
-dsh plugin add @strepsiades/dsh-remote-ssh
-```
-
-Reload DSH, then look for **Remote SSH** in the sidebar.
-
-### From a plugin index (Discover)
+### From a plugin index (Discover) — recommended
 
 DSH has no official market; a market is any HTTPS URL serving a format-1 `index.json`. This repository publishes one:
 
@@ -35,7 +29,15 @@ DSH has no official market; a market is any HTTPS URL serving a format-1 `index.
 https://cdn.jsdelivr.net/gh/Strepsiades2/dsh-remote-ssh@main/market/index.json
 ```
 
-Enable **Plugins → Experimental plugins → Custom plugin indexes**, open the **Discover** tab, add that URL, and install from there. (Raw fallback: `https://raw.githubusercontent.com/Strepsiades2/dsh-remote-ssh/main/market/index.json`.)
+Enable **Plugins → Experimental plugins → Custom plugin indexes**, open the **Discover** tab, add that URL, and install from there. Installing from the plugin page enables the bundle automatically. (Raw fallback: `https://raw.githubusercontent.com/Strepsiades2/dsh-remote-ssh/main/market/index.json`.)
+
+### Manually
+
+```bash
+dsh plugin add @strepsiades/dsh-remote-ssh
+```
+
+Then open **Plugins** and switch **Remote SSH** on: adding a dependency installs the package but does not select the bundle. Reload DSH afterwards if the sidebar has no **Remote SSH** entry.
 
 ## Usage
 
@@ -158,11 +160,7 @@ MIT © Strepsiades
 
 ## 安装
 
-```bash
-dsh plugin add @strepsiades/dsh-remote-ssh
-```
-
-### 从插件索引安装（Discover）
+### 从插件索引安装（Discover，推荐）
 
 DSH 没有官方市场；市场就是任意一个提供 format-1 `index.json` 的 HTTPS 地址。本仓库发布了一份：
 
@@ -170,7 +168,15 @@ DSH 没有官方市场；市场就是任意一个提供 format-1 `index.json` �
 https://cdn.jsdelivr.net/gh/Strepsiades2/dsh-remote-ssh@main/market/index.json
 ```
 
-打开 **插件 → 实验性插件 → 自定义插件索引**，进入 **Discover** 标签，添加该地址后即可浏览安装。（备用地址：`https://raw.githubusercontent.com/Strepsiades2/dsh-remote-ssh/main/market/index.json`）
+打开 **插件 → 实验性插件 → 自定义插件索引**，进入 **Discover** 标签，添加该地址后即可浏览安装；从插件页安装会自动启用。（备用地址：`https://raw.githubusercontent.com/Strepsiades2/dsh-remote-ssh/main/market/index.json`）
+
+### 手动安装
+
+```bash
+dsh plugin add @strepsiades/dsh-remote-ssh
+```
+
+然后在 **插件** 页把 **远程 SSH** 打开：只加依赖不会选中 bundle。若侧栏没有「远程 SSH」，刷新 DSH。
 
 ## 使用
 
