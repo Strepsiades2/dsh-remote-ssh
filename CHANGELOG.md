@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0
+
+首个公开发布版本。Windows 客户端已验证。
+
+- 传输层：纯 JS `ssh2`（0.8.0），不依赖系统 ssh / askpass / ControlMaster
+- ProxyJump：单跳与链式 SSH over SSH（0.8.1）
+- 读 token：SFTP 直接读远端日志，不依赖远程 shell（0.8.2）
+- 发布准备：`engines.dsh`、显式 `icon`、截图、插件市场索引与生成脚本
+- 文档：README 中英双语，补充安装（npm / 插件索引）、平台矩阵、已知缺口
+
 ## 0.8.2
 
 - 改进：读取 web token 改走 **SFTP**，不再依赖远程 shell —— Windows 远端因此不需要 PowerShell、也不需要 `grep`/`cat`

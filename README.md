@@ -4,6 +4,8 @@ SSH remote hosts for [DeepSeek Harness](https://deepseek.com): pick a machine fr
 
 It is the DSH equivalent of VS Code Remote-SSH — same SSH config, same keys, same jump hosts, but the remote side serves DSH instead of a language server.
 
+![Remote SSH panel](https://raw.githubusercontent.com/Strepsiades2/dsh-remote-ssh/main/docs/screenshots/connected.png)
+
 ## Features
 
 - **Hosts come from `~/.ssh/config`** — one source of truth, nothing to retype
@@ -24,6 +26,16 @@ dsh plugin add @strepsiades/dsh-remote-ssh
 ```
 
 Reload DSH, then look for **Remote SSH** in the sidebar.
+
+### From a plugin index (Discover)
+
+DSH has no official market; a market is any HTTPS URL serving a format-1 `index.json`. This repository publishes one:
+
+```
+https://cdn.jsdelivr.net/gh/Strepsiades2/dsh-remote-ssh@main/market/index.json
+```
+
+Enable **Plugins → Experimental plugins → Custom plugin indexes**, open the **Discover** tab, add that URL, and install from there. (Raw fallback: `https://raw.githubusercontent.com/Strepsiades2/dsh-remote-ssh/main/market/index.json`.)
 
 ## Usage
 
@@ -90,8 +102,8 @@ The default launch command resolves whichever install exists (`dsh` on `PATH`, e
 
 | | macOS | Linux | Windows |
 | --- | --- | --- | --- |
-| Plugin (client): connect, token, browser | ✅ verified | ✅ | ✅ expected (same in-process code) |
-| Password / keyboard-interactive auth | ✅ verified | ✅ expected | ✅ expected |
+| Plugin (client): connect, token, browser | ✅ verified | ✅ expected | ✅ verified (1.0.0) |
+| Password / keyboard-interactive auth | ✅ verified | ✅ expected | ✅ expected (same code path) |
 | Remote: token read (SFTP, shell-free) | ✅ verified | ✅ verified | ✅ expected (same SFTP path) |
 | Remote: start / stop DSH | ✅ verified | ✅ verified | ❌ commands are POSIX |
 
@@ -107,8 +119,10 @@ Known gaps: `ProxyCommand` is not implemented (it runs a local command, so the s
 
 | File | Role |
 | --- | --- |
-| `index.js` | Host half: routes, registry, ssh processes, skill registration |
+| `index.js` | Host half: routes, registry, remote commands, skill registration |
 | `client.js` | Client half: panel and dialogs |
+| `transport.js` | SSH transport: config resolution, auth, ProxyJump, forwarding, SFTP, exec |
+| `tools/build-market-index.mjs` | Generates `market/index.json` from the published npm metadata |
 | `skills/remote-dsh-ops/SKILL.md` | Runbook for preparing a machine as a remote DSH host |
 | `locale/` | Plugin metadata strings |
 | `cordis.patch.yml` | Bundle insert declaration |
@@ -126,6 +140,8 @@ MIT © Strepsiades
 从 `~/.ssh/config` 里选一台机器，保持一条 SSH 本地转发，然后在浏览器里打开那台机器上的 DSH Web 界面。
 
 这是 DSH 版的 VS Code Remote-SSH：同一份 SSH 配置、相同的密钥与跳板机，只是远端跑的是 DSH。
+
+![远程 SSH 面板](https://raw.githubusercontent.com/Strepsiades2/dsh-remote-ssh/main/docs/screenshots/connected.png)
 
 ## 功能
 
@@ -145,6 +161,16 @@ MIT © Strepsiades
 ```bash
 dsh plugin add @strepsiades/dsh-remote-ssh
 ```
+
+### 从插件索引安装（Discover）
+
+DSH 没有官方市场；市场就是任意一个提供 format-1 `index.json` 的 HTTPS 地址。本仓库发布了一份：
+
+```
+https://cdn.jsdelivr.net/gh/Strepsiades2/dsh-remote-ssh@main/market/index.json
+```
+
+打开 **插件 → 实验性插件 → 自定义插件索引**，进入 **Discover** 标签，添加该地址后即可浏览安装。（备用地址：`https://raw.githubusercontent.com/Strepsiades2/dsh-remote-ssh/main/market/index.json`）
 
 ## 使用
 
@@ -198,8 +224,8 @@ dsh plugin add @strepsiades/dsh-remote-ssh
 
 | | macOS | Linux | Windows |
 | --- | --- | --- | --- |
-| 插件（客户端）：连接 / token / 浏览器 | ✅ 已验证 | ✅ | ✅ 预期可用（同一套进程内实现） |
-| 密码 / keyboard-interactive 认证 | ✅ 已验证 | ✅ 预期可用 | ✅ 预期可用 |
+| 插件（客户端）：连接 / token / 浏览器 | ✅ 已验证 | ✅ 预期可用 | ✅ 已验证（1.0.0） |
+| 密码 / keyboard-interactive 认证 | ✅ 已验证 | ✅ 预期可用 | ✅ 预期可用（同一代码路径） |
 | 远端：读取 token（SFTP，不依赖 shell） | ✅ 已验证 | ✅ 已验证 | ✅ 预期可用（同一 SFTP 路径） |
 | 远端：启动 / 停止 DSH | ✅ 已验证 | ✅ 已验证 | ❌ 命令是 POSIX |
 

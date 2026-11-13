@@ -1,10 +1,11 @@
 {
   "name": "@strepsiades/dsh-remote-ssh",
-  "version": "0.8.2",
+  "version": "1.0.0",
   "private": false,
-  "description": "SSH remote hosts for DeepSeek Harness: pick a host from ~/.ssh/config, keep an \"SSH local forward, and open its DSH web UI in the browser.",
+  "description": "SSH remote hosts for DeepSeek Harness: pick a host from ~/.ssh/config, keep an SSH local forward, and open its DSH web UI in the browser.",
   "author": "Strepsiades",
   "license": "MIT",
+  "icon": "./icon.svg",
   "keywords": [
     "dsh",
     "dsh-plugin",
@@ -23,7 +24,8 @@
     "url": "https://github.com/Strepsiades2/dsh-remote-ssh/issues"
   },
   "engines": {
-    "dsh": ">=0.2.1-rc.5 <0.3.0"
+    "dsh": ">=0.2.1-rc.5 <0.3.0",
+    "node": ">=18"
   },
   "publishConfig": {
     "access": "public"
