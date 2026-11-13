@@ -4,7 +4,7 @@ SSH remote hosts for [DeepSeek Harness](https://deepseek.com): pick a machine fr
 
 It is the DSH equivalent of VS Code Remote-SSH — same SSH config, same keys, same jump hosts, but the remote side serves DSH instead of a language server.
 
-![Remote SSH panel](https://raw.githubusercontent.com/Strepsiades2/dsh-remote-ssh/main/docs/screenshots/connected.png)
+![Remote SSH panel](https://cdn.jsdelivr.net/gh/Strepsiades2/dsh-remote-ssh@main/docs/screenshots/connected.png)
 
 ## Features
 
@@ -141,7 +141,7 @@ MIT © Strepsiades
 
 这是 DSH 版的 VS Code Remote-SSH：同一份 SSH 配置、相同的密钥与跳板机，只是远端跑的是 DSH。
 
-![远程 SSH 面板](https://raw.githubusercontent.com/Strepsiades2/dsh-remote-ssh/main/docs/screenshots/connected.png)
+![远程 SSH 面板](https://cdn.jsdelivr.net/gh/Strepsiades2/dsh-remote-ssh@main/docs/screenshots/connected.png)
 
 ## 功能
 
