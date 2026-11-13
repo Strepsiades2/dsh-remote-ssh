@@ -1,0 +1,78 @@
+{
+  "format": 1,
+  "title": {
+    "en": "Strepsiades DSH Plugins",
+    "zh": "Strepsiades DSH 插件"
+  },
+  "description": {
+    "en": "Community DSH bundles by Strepsiades.",
+    "zh": "Strepsiades 的 DSH 插件。"
+  },
+  "metadata": {
+    "categories": {
+      "remote": {
+        "title": {
+          "en": "Remote",
+          "zh": "远程"
+        }
+      }
+    },
+    "labels": {
+      "community": {
+        "title": {
+          "en": "Community",
+          "zh": "社区"
+        }
+      }
+    }
+  },
+  "plugins": [
+    {
+      "name": "@strepsiades/dsh-remote-ssh",
+      "title": {
+        "en": "Remote SSH",
+        "zh": "远程 SSH"
+      },
+      "description": {
+        "en": "Manage SSH hosts and open their DSH web UI in the browser — the DSH counterpart of VS Code Remote-SSH.",
+        "zh": "维护 SSH 主机列表，在浏览器里打开远端的 DSH 界面——相当于 DSH 版的 VS Code Remote-SSH。"
+      },
+      "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IlJlbW90ZSBTU0giPgogIDxyZWN0IHg9IjQiIHk9IjEwIiB3aWR0aD0iNTYiIGhlaWdodD0iNDQiIHJ4PSI4IiBmaWxsPSJub25lIiBzdHJva2U9IiM0YzhkZmYiIHN0cm9rZS13aWR0aD0iMyIvPgogIDxwYXRoIGQ9Ik0xOCA0MGMwLTcuNyA2LjMtMTQgMTQtMTRzMTQgNi4zIDE0IDE0IiBmaWxsPSJub25lIiBzdHJva2U9IiM0YzhkZmYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPHBhdGggZD0iTTI1IDQ0YzAtMy45IDMuMS03IDctN3M3IDMuMSA3IDciIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzRjOGRmZiIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KICA8Y2lyY2xlIGN4PSIzMiIgY3k9IjQ2IiByPSIyLjYiIGZpbGw9IiM0YzhkZmYiLz4KPC9zdmc+Cg==",
+      "author": "Strepsiades",
+      "homepage": "https://github.com/Strepsiades2/dsh-remote-ssh#readme",
+      "repository": {
+        "url": "https://github.com/Strepsiades2/dsh-remote-ssh"
+      },
+      "metadata": {
+        "category": "remote",
+        "labels": [
+          "community"
+        ],
+        "keywords": [
+          "dsh",
+          "dsh-plugin",
+          "deepseek-harness",
+          "ssh",
+          "ssh-tunnel",
+          "remote",
+          "port-forward"
+        ]
+      },
+      "dist-tags": {
+        "latest": "1.0.0"
+      },
+      "versions": [
+        {
+          "version": "1.0.0",
+          "publishTimestamp": 1794538233,
+          "source": {
+            "type": "npm"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.5 <0.3.0"
+          }
+        }
+      ]
+    }
+  ]
+}
