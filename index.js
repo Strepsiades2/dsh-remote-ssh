@@ -244,9 +244,9 @@ function tokenFrom(text) {
 }
 
 /** Legacy fallback: a remote that keeps its URL in ~/.dsh-web.url. */
-async function readRemoteUrl(host, password) {
+async function readRemoteUrl(host, password, passphrase) {
   try {
-    const file = await transport.readRemoteFile(host, settings, ['~/.dsh-web.url'], { password })
+    const file = await transport.readRemoteFile(host, settings, ['~/.dsh-web.url'], { password, passphrase })
     if (!file) return null
     const match = file.text.match(/https?:\/\/[^\s"']+/)
     return match ? match[0] : null
@@ -268,17 +268,17 @@ const TOKEN_FILES = ['~/.dsh-web.log', '~/.dsh/logs/web.log']
  * Linux, macOS and Windows remotes. A shell fallback remains for servers without an
  * SFTP subsystem.
  */
-async function resolveToken(host, password) {
+async function resolveToken(host, password, passphrase) {
   if (host.token) return String(host.token)
 
-  const fromFile = tokenFrom(await readRemoteUrl(host, password))
+  const fromFile = tokenFrom(await readRemoteUrl(host, password, passphrase))
   if (fromFile) return fromFile
 
   const port = Number(host.remotePort ?? settings.defaultRemotePort)
   const needle = `127.0.0.1:${port}/?token=`
 
   try {
-    const log = await transport.readRemoteFile(host, settings, TOKEN_FILES, { password })
+    const log = await transport.readRemoteFile(host, settings, TOKEN_FILES, { password, passphrase })
     if (log) {
       const lines = log.text.split(/\r?\n/).filter((line) => line.includes(needle))
       if (lines.length > 0) return tokenFrom(lines[lines.length - 1])
@@ -289,17 +289,17 @@ async function resolveToken(host, password) {
   const posix = `for f in ~/.dsh-web.log ~/.dsh/logs/web.log; do `
     + `[ -f "$f" ] && grep ${JSON.stringify(needle)} "$f" | tail -1 && break; `
     + 'done'
-  const viaPosix = await transport.exec(host, settings, posix, { password, timeoutMs: 20000 })
+  const viaPosix = await transport.exec(host, settings, posix, { password, passphrase, timeoutMs: 20000 })
   const fromPosix = tokenFrom(viaPosix.stdout)
   if (fromPosix) return fromPosix
 
-  const viaWindows = await transport.exec(host, settings, powershellCommand(windowsTokenScript(port)), { password, timeoutMs: 25000 })
+  const viaWindows = await transport.exec(host, settings, powershellCommand(windowsTokenScript(port)), { password, passphrase, timeoutMs: 25000 })
   return tokenFrom(viaWindows.stdout)
 }
 
 /** Ask the remote to launch dsh web; resolves with what the remote reported. */
-async function startRemote(host, password) {
-  const result = await transport.exec(host, settings, startCommandFor(host), { password, timeoutMs: 30000 })
+async function startRemote(host, password, passphrase) {
+  const result = await transport.exec(host, settings, startCommandFor(host), { password, passphrase, timeoutMs: 30000 })
   const out = `${result.stdout}\n${result.stderr}`
   if (/NO_DSH/.test(out)) return { ok: false, reason: 'no-dsh' }
   if (result.code !== 0) return { ok: false, reason: out.trim().slice(-400) || `remote exit ${result.code}` }
@@ -310,7 +310,7 @@ async function startRemote(host, password) {
  * Stop the remote dsh web listening on this host's DSH port. Only the listener on
  * that port is signalled; nothing else on the machine is touched.
  */
-async function stopRemote(host, password) {
+async function stopRemote(host, password, passphrase) {
   const port = Number(host.remotePort ?? settings.defaultRemotePort)
   const script = [
     `PIDS=$(ss -ltnp 2>/dev/null | grep -E ":${port}\\b" | grep -oE "pid=[0-9]+" | cut -d= -f2 | sort -u);`,
@@ -318,7 +318,7 @@ async function stopRemote(host, password) {
     'kill -TERM $PIDS 2>/dev/null; sleep 1;',
     `if ss -ltn 2>/dev/null | grep -qE ":${port}\\b"; then kill -KILL $PIDS 2>/dev/null; echo KILLED; else echo STOPPED; fi`,
   ].join(' ')
-  const result = await transport.exec(host, settings, script, { password, timeoutMs: 20000 })
+  const result = await transport.exec(host, settings, script, { password, passphrase, timeoutMs: 20000 })
   const out = `${result.stdout} ${result.stderr}`.trim()
   if (result.code !== 0) return { ok: false, reason: out.slice(-300) || `remote exit ${result.code}` }
   if (/NOT_RUNNING/.test(out)) return { ok: true, state: 'not-running' }
@@ -432,8 +432,9 @@ function jsonResponse(status, payload) {
  */
 /** Ensure the tunnel, make sure the remote DSH answers, and build the token URL. */
 async function openHost(body) {
-  // Never persisted: the password exists for this request only.
+  // Never persisted: the password/passphrase exists for this request only.
   const password = typeof body.password === 'string' && body.password.length > 0 ? body.password : null
+  const passphrase = typeof body.passphrase === 'string' && body.passphrase.length > 0 ? body.passphrase : null
   const config = await loadConfig()
   const index = config.hosts.findIndex((item) => item.name === body.name)
   if (index < 0) {
@@ -470,7 +471,7 @@ async function openHost(body) {
       })
     }
     try {
-      await transport.forward(host, settings, localPort, remotePort, { password })
+      await transport.forward(host, settings, localPort, remotePort, { password, passphrase })
       forwards.set(host.name, remotePort)
     } catch (error) {
       const code = error.code || 'TRANSPORT'
@@ -481,6 +482,15 @@ async function openHost(body) {
           detail: error.message,
           hint: error.hint || '',
           action: { kind: 'password', name: host.name },
+        })
+      }
+      if (code === 'PASSPHRASE_REQUIRED' || code === 'PASSPHRASE_REJECTED') {
+        return jsonResponse(401, {
+          error: code === 'PASSPHRASE_REJECTED' ? '私钥口令不正确' : '这台主机的私钥有口令',
+          code,
+          detail: error.message,
+          hint: error.hint || '',
+          action: { kind: 'passphrase', name: host.name },
         })
       }
       if (code === 'PORT_BUSY') {
@@ -502,7 +512,7 @@ async function openHost(body) {
   if (body.restart === true) {
     // A token that no longer matches the live process cannot be recovered from the
     // log; restarting is the only way to get a token that does match.
-    await stopRemote(host, password)
+    await stopRemote(host, password, passphrase)
   }
 
   let health = await probeHttp(localPort)
@@ -521,7 +531,7 @@ async function openHost(body) {
       })
     }
 
-    const started = await startRemote(host, password)
+    const started = await startRemote(host, password, passphrase)
     if (!started.ok) {
       return jsonResponse(502, {
         error: '远端启动失败',
@@ -564,7 +574,7 @@ async function openHost(body) {
     })
   }
 
-  const token = await resolveToken(host, password)
+  const token = await resolveToken(host, password, passphrase)
   if (token) {
     const check = await probeHttp(localPort, 2500, `/?token=${encodeURIComponent(token)}`)
     const accepted = check.ok && (check.status === 303 || check.status === 200)
@@ -701,11 +711,11 @@ async function handleFetch(request) {
     if (method === 'POST' && route === '/close') {
       const config = await loadConfig()
       const host = config.hosts.find((item) => item.name === body.name)
+      // Stop before closing: stopping needs the authenticated SSH connection, and a
+      // password/passphrase host cannot re-authenticate without the user's secret.
+      const stop = settings.stopRemoteOnDisconnect === true && host ? await stopRemote(host) : null
       const closed = transport.close(body.name)
       forwards.delete(body.name)
-      // Stopping the remote service is a side effect on the other machine, so it
-      // only happens when the user turned that setting on.
-      const stop = settings.stopRemoteOnDisconnect === true && host ? await stopRemote(host) : null
       return jsonResponse(200, { ok: true, closed, stopped: stop })
     }
 

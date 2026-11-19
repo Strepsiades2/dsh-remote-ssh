@@ -47,6 +47,11 @@ window.__ModuleLoader__.load({
         'password.hint': 'used for this connection only, never saved',
         'password.placeholder': 'SSH password',
         'password.rejected': 'Wrong password — try again',
+        'passphrase.title': 'Passphrase required',
+        'passphrase.hint': 'used for this connection only, never saved',
+        'passphrase.placeholder': 'Private key passphrase',
+        'passphrase.rejected': 'Wrong passphrase — try again',
+        'action.enterPassphrase': 'Enter passphrase',
         'action.remove': 'Remove',
         'action.save': 'Save',
         'action.cancel': 'Cancel',
@@ -123,6 +128,11 @@ window.__ModuleLoader__.load({
         'password.hint': '仅用于本次连接，不会保存',
         'password.placeholder': 'SSH 密码',
         'password.rejected': '密码不正确，请重试',
+        'passphrase.title': '需要私钥口令',
+        'passphrase.hint': '仅用于本次连接，不会保存',
+        'passphrase.placeholder': '私钥口令',
+        'passphrase.rejected': '私钥口令不正确，请重试',
+        'action.enterPassphrase': '输入私钥口令',
         'action.remove': '删除',
         'action.save': '保存',
         'action.cancel': '取消',
@@ -329,9 +339,9 @@ window.__ModuleLoader__.load({
           .catch((problem) => setError(failureOf(problem)))
 
         /** POST /open is idempotent: it reuses a live tunnel and returns its token URL. */
-        const requestUrl = (name, password, options) => api('/open', {
+        const requestUrl = (name, secret, options) => api('/open', {
           method: 'POST',
-          body: JSON.stringify(Object.assign({ name }, password ? { password } : {}, options || {})),
+          body: JSON.stringify(Object.assign({ name }, secret || {}, options || {})),
         })
 
 
@@ -350,22 +360,24 @@ window.__ModuleLoader__.load({
          */
         const openFailure = (problem, name, viaBrowser) => {
           const payload = (problem && problem.payload) || {}
-          if (payload.code === 'AUTH_REQUIRED') {
-            setAuthPrompt({ name, value: '', error: null, viaBrowser })
+          const passphrase = payload.code === 'PASSPHRASE_REQUIRED' || payload.code === 'PASSPHRASE_REJECTED'
+          const kind = passphrase ? 'passphrase' : 'password'
+          if (payload.code === 'AUTH_REQUIRED' || payload.code === 'PASSPHRASE_REQUIRED') {
+            setAuthPrompt({ name, value: '', error: null, viaBrowser, kind })
             return
           }
-          if (payload.code === 'AUTH_REJECTED') {
-            setAuthPrompt({ name, value: '', error: payload.error || tt('password.rejected'), viaBrowser })
+          if (payload.code === 'AUTH_REJECTED' || payload.code === 'PASSPHRASE_REJECTED') {
+            setAuthPrompt({ name, value: '', error: payload.error || (passphrase ? tt('passphrase.rejected') : tt('password.rejected')), viaBrowser, kind })
             return
           }
           setError(failureOf(problem, name))
         }
 
-        const open = (name, password, options) => {
+        const open = (name, secret, options) => {
           setBusy(name); setNotice(null); setError(null)
           if (options && options.start) setNotice(tt('notice.starting'))
           if (options && options.restart) setNotice(tt('notice.restarting'))
-          requestUrl(name, password, options)
+          requestUrl(name, secret, options)
             .then((result) => {
               if (result.url) setNotice(`${tt('notice.opened')} · 127.0.0.1:${result.localPort}`)
               else setError({ text: tt('notice.noToken'), hint: result.hint || null, action: { kind: 'edit', name } })
@@ -376,11 +388,11 @@ window.__ModuleLoader__.load({
         }
 
         /** Establish (or reuse) the forward, then hand the token URL to the browser. */
-        const openBrowser = (name, password, options) => {
+        const openBrowser = (name, secret, options) => {
           setBusy(name); setError(null)
           if (options && options.start) setNotice(tt('notice.starting'))
           if (options && options.restart) setNotice(tt('notice.restarting'))
-          requestUrl(name, password, options)
+          requestUrl(name, secret, options)
             .then((result) => {
               if (result.url) window.open(result.url, '_blank', 'noopener')
               else setError({ text: tt('notice.noToken'), hint: result.hint || null, action: { kind: 'edit', name } })
@@ -428,6 +440,7 @@ window.__ModuleLoader__.load({
                   ...actions.map((action) => textButton(
                     action.kind === 'ai' ? tt('action.ai')
                       : action.kind === 'password' ? tt('action.enterPassword')
+                        : action.kind === 'passphrase' ? tt('action.enterPassphrase')
                         : action.kind === 'start' ? tt('action.startRemote')
                           : action.kind === 'restart' ? tt('action.restartRemote')
                             : action.kind === 'cleanup' ? tt('action.cleanupPort')
@@ -442,7 +455,11 @@ window.__ModuleLoader__.load({
         const runErrorAction = (action) => {
           const host = hosts.find((item) => item.name === action.name)
           if (action.kind === 'ai') { copyText(action.prompt || prepPrompt(action.name || '')); return }
-          if (action.kind === 'password') { setError(null); setAuthPrompt({ name: action.name, value: '', viaBrowser: Boolean(action.viaBrowser) }); return }
+          if (action.kind === 'password' || action.kind === 'passphrase') {
+            setError(null)
+            setAuthPrompt({ name: action.name, value: '', viaBrowser: Boolean(action.viaBrowser), kind: action.kind })
+            return
+          }
           if (action.kind === 'start') { setError(null); open(action.name, null, { start: true }); return }
           if (action.kind === 'restart') { setError(null); open(action.name, null, { restart: true }); return }
           if (action.kind === 'cleanup') {
@@ -554,20 +571,22 @@ window.__ModuleLoader__.load({
           notice ? banner(notice, 'var(--dsh-accent, #4c8dff)') : null,
           showSettings && SettingsComponent ? settingsModal() : null,
           body,
-          h('div', { style: Object.assign({ fontSize: '0.7em', marginTop: '1.618em', opacity: 0.6 }, SURFACE.dim) }, 'build 1.0.0'),
+          h('div', { style: Object.assign({ fontSize: '0.7em', marginTop: '1.618em', opacity: 0.6 }, SURFACE.dim) }, 'build 1.1.0'),
           adding ? addModal() : null,
           editing ? editModal() : null,
           authPrompt ? passwordModal() : null,
         )
 
         function passwordModal() {
+          const isPassphrase = (authPrompt.kind || 'password') === 'passphrase'
           const submit = () => {
             const name = authPrompt.name
             const value = authPrompt.value
             const viaBrowser = authPrompt.viaBrowser
+            const secret = isPassphrase ? { passphrase: value } : { password: value }
             setAuthPrompt(null)
-            if (viaBrowser) openBrowser(name, value)
-            else open(name, value)
+            if (viaBrowser) openBrowser(name, secret)
+            else open(name, secret)
           }
           return h('div', {
             style: {
@@ -583,13 +602,13 @@ window.__ModuleLoader__.load({
                 padding: '1.3em 1.4em', boxShadow: '0 18px 48px rgba(0,0,0,0.28)', border: SURFACE.border,
               },
             },
-              h('div', { style: { fontSize: '1.05em', fontWeight: 600 } }, tt('password.title')),
+              h('div', { style: { fontSize: '1.05em', fontWeight: 600 } }, isPassphrase ? tt('passphrase.title') : tt('password.title')),
               h('div', { style: Object.assign({ fontSize: '0.78em', margin: '0.25em 0 0.9em' }, SURFACE.dim) },
-                authPrompt.name, ' · ', tt('password.hint')),
+                authPrompt.name, ' · ', isPassphrase ? tt('passphrase.hint') : tt('password.hint')),
               h('input', {
                 type: 'password', autoFocus: true, autoComplete: 'off', style: inputStyle,
                 value: authPrompt.value,
-                placeholder: tt('password.placeholder'),
+                placeholder: isPassphrase ? tt('passphrase.placeholder') : tt('password.placeholder'),
                 onChange: (event) => setAuthPrompt(Object.assign({}, authPrompt, { value: event.target.value })),
                 onKeyDown: (event) => { if (event.key === 'Enter') submit() },
               }),

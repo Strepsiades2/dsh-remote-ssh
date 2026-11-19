@@ -207,7 +207,7 @@ function hostVerifierFor(info, state) {
 
 const connections = new Map()
 
-function authOptions(info, password, state) {
+function authOptions(info, password, passphrase, state) {
   const options = {
     host: info.hostname,
     port: info.port,
@@ -224,6 +224,7 @@ function authOptions(info, password, state) {
   }
   if (info.identityFile && existsSync(info.identityFile)) {
     options.privateKey = readFileSync(info.identityFile)
+    if (passphrase) options.passphrase = passphrase
   }
   const agent = process.env.SSH_AUTH_SOCK
   if (agent) options.agent = agent
@@ -257,13 +258,19 @@ function classify(error, info, hasPassword) {
   if (code === 'ENOTFOUND') {
     return new TransportError('NETWORK', `无法解析主机名：${info.hostname}`, '检查 ~/.ssh/config 里的 HostName 是否正确。')
   }
-  if (/private key|parse key|no passphrase/i.test(message)) {
-    return new TransportError('KEY_INVALID', '私钥无法使用', '确认 IdentityFile 指向正确的私钥；带口令的密钥目前需要通过 ssh-agent 加载。')
+  if (/no passphrase given|Encrypted private OpenSSH key|Encrypted OpenSSH private key/i.test(message)) {
+    return new TransportError('PASSPHRASE_REQUIRED', `${info.destination} 的私钥有口令`, '输入私钥口令后继续：口令只用于本次连接，不会保存。')
+  }
+  if (/bad passphrase|integrity check failed/i.test(message)) {
+    return new TransportError('PASSPHRASE_REJECTED', '私钥口令不正确', '重新输入私钥口令；口令只用于本次连接，不会保存。')
+  }
+  if (/private key|parse key/i.test(message)) {
+    return new TransportError('KEY_INVALID', '私钥无法使用', '确认 IdentityFile 指向正确的私钥。')
   }
   return new TransportError('TRANSPORT', message.split('\n')[0], null)
 }
 
-function connectOnce(info, password, sock = null, timeoutMs = 20000) {
+function connectOnce(info, password, passphrase, sock = null, timeoutMs = 20000) {
   return new Promise((resolve, reject) => {
     const client = new Client()
     const state = { hostKeyMismatch: false }
@@ -294,7 +301,7 @@ function connectOnce(info, password, sock = null, timeoutMs = 20000) {
       finish(answers)
     })
     try {
-      const options = authOptions(info, password, state)
+      const options = authOptions(info, password, passphrase, state)
       if (sock) options.sock = sock
       client.connect(options)
     } catch (error) {
@@ -321,9 +328,9 @@ function channelTo(client, hostname, port) {
  * SSH connection made over a channel of the previous one (SSH over SSH), which is
  * what OpenSSH's ProxyJump does as well.
  */
-async function connectTarget(info, password, settings) {
+async function connectTarget(info, password, passphrase, settings) {
   const hops = proxyHops(info)
-  if (hops.length === 0) return { client: await connectOnce(info, password), upstream: [] }
+  if (hops.length === 0) return { client: await connectOnce(info, password, passphrase), upstream: [] }
 
   const upstream = []
   let sock = null
@@ -334,12 +341,12 @@ async function connectTarget(info, password, settings) {
         throw new TransportError('UNSUPPORTED', '跳板机本身的 ProxyJump 暂不支持', '请简化 ~/.ssh/config 里的 ProxyJump 链。')
       }
       // Jump hosts authenticate with their own keys/agent; the password belongs to the target.
-      const hopClient = await connectOnce(hopInfo, null, sock)
+      const hopClient = await connectOnce(hopInfo, null, null, sock)
       upstream.push(hopClient)
       const next = index + 1 < hops.length ? resolveDestination(hops[index + 1], settings) : info
       sock = await channelTo(hopClient, next.hostname, next.port)
     }
-    const client = await connectOnce(info, password, sock)
+    const client = await connectOnce(info, password, passphrase, sock)
     return { client, upstream }
   } catch (error) {
     for (const client of upstream) { try { client.end() } catch {} }
@@ -352,14 +359,17 @@ async function connectTarget(info, password, settings) {
  * commands. Password-created connections are keyed separately so a later
  * key-based connect does not reuse a session the user did not authorise.
  */
-export async function connect(host, settings, { password } = {}) {
+export async function connect(host, settings, { password, passphrase } = {}) {
   const info = resolveHost(host, settings)
   if (!info.destination) throw new TransportError('INVALID', 'invalid ssh destination')
-  const cacheKey = `${host.name}|${info.hostname}|${info.port}|${info.user}|${info.proxyJump || ''}|${password ? 'pw' : 'key'}`
+  const cacheKey = `${host.name}|${info.hostname}|${info.port}|${info.user}|${info.proxyJump || ''}|${password ? 'pw' : passphrase ? 'pp' : 'key'}`
   const existing = connections.get(host.name)
   if (existing && existing.cacheKey === cacheKey && existing.client) return existing
+  // A live authenticated connection needs no secret again: commands that run without
+  // one (stop-on-disconnect, status) must reuse it instead of failing to re-auth.
+  if (existing && existing.client && !password && !passphrase) return existing
 
-  const { client, upstream } = await connectTarget(info, password, settings)
+  const { client, upstream } = await connectTarget(info, password, passphrase, settings)
   const entry = { client, upstream, cacheKey, info, server: null, localPort: null }
   connections.set(host.name, entry)
   client.on('close', () => {
@@ -382,8 +392,8 @@ export function localPortOf(name) {
 }
 
 /** Run one command on the remote over the cached connection. */
-export function exec(host, settings, command, { password, timeoutMs = 25000 } = {}) {
-  return connect(host, settings, { password }).then((entry) => new Promise((resolve) => {
+export function exec(host, settings, command, { password, passphrase, timeoutMs = 25000 } = {}) {
+  return connect(host, settings, { password, passphrase }).then((entry) => new Promise((resolve) => {
     let stdout = ''
     let stderr = ''
     let settled = false
@@ -409,8 +419,8 @@ function sftpSession(entry) {
  * Read a remote file over SFTP. This needs no shell at all, so the same code works
  * on Linux, macOS and Windows remotes. `~` is resolved with the server's own home.
  */
-export async function readRemoteFile(host, settings, candidates, { password } = {}) {
-  const entry = await connect(host, settings, { password })
+export async function readRemoteFile(host, settings, candidates, { password, passphrase } = {}) {
+  const entry = await connect(host, settings, { password, passphrase })
   const sftp = await sftpSession(entry)
   try {
     const home = await new Promise((resolve, reject) => {
@@ -435,8 +445,8 @@ export async function readRemoteFile(host, settings, candidates, { password } = 
 }
 
 /** Local listener that forwards every accepted socket through the SSH connection. */
-export async function forward(host, settings, localPort, remotePort, { password } = {}) {
-  const entry = await connect(host, settings, { password })
+export async function forward(host, settings, localPort, remotePort, { password, passphrase } = {}) {
+  const entry = await connect(host, settings, { password, passphrase })
   if (entry.server && entry.localPort === localPort) return entry
   if (entry.server) await closeForward(host.name)
 

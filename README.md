@@ -14,7 +14,7 @@ It is the DSH equivalent of VS Code Remote-SSH — same SSH config, same keys, s
 - **Actionable failures** — port in use, network unreachable, and authentication failure each get their own next step
 - **Password / MFA hosts** — a dialog asks for the password when needed; it is used for that connection only and never written to disk
 - Pure-JS SSH client (`ssh2`): no system `ssh` binary, no askpass helper — the same code runs on macOS, Linux and Windows
-- Password and keyboard-interactive authentication on every platform; keys via `IdentityFile` or an agent
+- Password, keyboard-interactive and **encrypted-key passphrase** authentication on every platform; keys via `IdentityFile` or an agent
 - **ProxyJump** hops (SSH over SSH), so internal hosts behind a bastion work without extra forwarding
 - The tunnel and the remote commands that read the token share one authenticated connection
 - Ships a `remote-dsh-ops` skill so an agent can turn a bare machine into a remote DSH host
@@ -153,7 +153,7 @@ MIT © Strepsiades
 - **错误可操作**：端口占用、网络不通、认证失败分别给出下一步
 - **密码 / MFA 主机**：需要时弹窗输入，仅用于本次连接，不落盘
 - 纯 JS SSH 客户端（`ssh2`）：不依赖系统 `ssh`、不需要 askpass，macOS / Linux / Windows 同一套代码
-- 密码与 keyboard-interactive 认证全平台可用；密钥走 `IdentityFile` 或 agent
+- 密码、keyboard-interactive 与**加密私钥口令**认证全平台可用；密钥走 `IdentityFile` 或 agent
 - **ProxyJump**（SSH over SSH）：内网主机可以经跳板机直接连，无需额外转发
 - 隧道与读取 token 共用同一条已认证连接
 - 附带 `remote-dsh-ops` skill，可让 agent 把一台空机器准备成远程 DSH 主机
