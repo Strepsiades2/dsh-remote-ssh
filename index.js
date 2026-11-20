@@ -302,7 +302,9 @@ async function startRemote(host, password, passphrase) {
   const result = await transport.exec(host, settings, startCommandFor(host), { password, passphrase, timeoutMs: 30000 })
   const out = `${result.stdout}\n${result.stderr}`
   if (/NO_DSH/.test(out)) return { ok: false, reason: 'no-dsh' }
-  if (result.code !== 0) return { ok: false, reason: out.trim().slice(-400) || `remote exit ${result.code}` }
+  if (result.code !== 0) {
+    return { ok: false, reason: out.trim().slice(-400) || `remote exit ${result.code}`, hint: startFailureHint(out) }
+  }
   return { ok: true }
 }
 
@@ -312,15 +314,14 @@ async function startRemote(host, password, passphrase) {
  */
 async function stopRemote(host, password, passphrase) {
   const port = Number(host.remotePort ?? settings.defaultRemotePort)
-  const script = [
-    `PIDS=$(ss -ltnp 2>/dev/null | grep -E ":${port}\\b" | grep -oE "pid=[0-9]+" | cut -d= -f2 | sort -u);`,
-    '[ -z "$PIDS" ] && { echo NOT_RUNNING; exit 0; };',
-    'kill -TERM $PIDS 2>/dev/null; sleep 1;',
-    `if ss -ltn 2>/dev/null | grep -qE ":${port}\\b"; then kill -KILL $PIDS 2>/dev/null; echo KILLED; else echo STOPPED; fi`,
-  ].join(' ')
+  const script = host.stopCommand
+    ? String(host.stopCommand).replace(/\{port\}/g, String(port))
+    : posixStopScript(port)
   const result = await transport.exec(host, settings, script, { password, passphrase, timeoutMs: 20000 })
   const out = `${result.stdout} ${result.stderr}`.trim()
-  if (result.code !== 0) return { ok: false, reason: out.slice(-300) || `remote exit ${result.code}` }
+  if (result.code !== 0) {
+    return { ok: false, reason: out.slice(-300) || `remote exit ${result.code}`, hint: stopFailureHint(out) }
+  }
   if (/NOT_RUNNING/.test(out)) return { ok: true, state: 'not-running' }
   if (/KILLED/.test(out)) return { ok: true, state: 'killed' }
   return { ok: true, state: 'stopped' }
@@ -353,11 +354,45 @@ function defaultStartScript(port) {
   ].join(' ')
 }
 
-/** The command to run for this host: its own template, or the built-in script. */
+/** The command to run for this host: its own template, or the built-in POSIX script. */
 function startCommandFor(host) {
   const port = String(Number(host.remotePort ?? settings.defaultRemotePort))
   if (host.startCommand) return String(host.startCommand).replace(/\{port\}/g, port)
   return defaultStartScript(port)
+}
+
+/** Explain the common start failures without trying to repair the host. */
+function startFailureHint(output) {
+  const text = String(output || '')
+  if (/ERR_MODULE_NOT_FOUND|Cannot find package '@deepseek-ai/i.test(text)) {
+    return '远端 dsh web 的 profile 缺官方包（ERR_MODULE_NOT_FOUND）。让 agent 先修复 profile（例如 junction/npm install）；插件只执行启动命令，不会自动安装。参考 remote-dsh-ops skill 的 Windows 部分。'
+  }
+  if (/umask|不是内部或外部命令|not recognized|CommandNotFoundException|The term .* is not recognized/i.test(text)) {
+    return '默认启动脚本是 POSIX，远端看起来是 Windows。请让 agent 准备 Windows 启动命令（WMI/计划任务/脚本），填进主机编辑的 startCommand。'
+  }
+  if (/EADDRINUSE|address already in use/i.test(text)) {
+    return '远端 DSH 端口已被占用：先停止旧 dsh web，或在编辑里改 remotePort。'
+  }
+  return null
+}
+
+/** Explain a failed stop; the plugin does not guess the remote OS. */
+function stopFailureHint(output) {
+  const text = String(output || '')
+  if (/ss:|不是内部或外部命令|not recognized|CommandNotFoundException|The term .* is not recognized/i.test(text)) {
+    return '默认停止脚本是 POSIX；Windows 请为这台主机填写 agent 准备的 stopCommand，或手动停止。'
+  }
+  return '停止失败：检查 stopCommand、远端端口和进程权限。'
+}
+
+/** POSIX stop script, used when the host has no stopCommand. */
+function posixStopScript(port) {
+  return [
+    `PIDS=$(ss -ltnp 2>/dev/null | grep -E ":${port}\\b" | grep -oE "pid=[0-9]+" | cut -d= -f2 | sort -u);`,
+    '[ -z "$PIDS" ] && { echo NOT_RUNNING; exit 0; };',
+    'kill -TERM $PIDS 2>/dev/null; sleep 1;',
+    `if ss -ltn 2>/dev/null | grep -qE ":${port}\\b"; then kill -KILL $PIDS 2>/dev/null; echo KILLED; else echo STOPPED; fi`,
+  ].join(' ')
 }
 
 /** Ask the remote to launch dsh web; resolves with what ssh reported. */
@@ -523,7 +558,7 @@ async function openHost(body) {
         error: '连接已建立，但远端 dsh web 没有响应',
         code: 'REMOTE_NOT_RUNNING',
         detail: health.reason,
-        hint: '可以让插件替你在远端启动它，最多等待 30 秒就绪；失败会给出具体原因。',
+        hint: '可以让插件替你在远端启动它，最多等待 30 秒就绪；失败会给出具体原因。Windows 主机请先在主机编辑里填写 agent 准备的 startCommand（默认 POSIX 脚本不适用）。',
         actions: [
           { kind: 'start', name: host.name },
           aiAction('remote', host.name, health.reason),
@@ -537,9 +572,9 @@ async function openHost(body) {
         error: '远端启动失败',
         code: started.reason === 'no-dsh' ? 'NO_DSH' : 'START_FAILED',
         detail: started.reason,
-        hint: started.reason === 'no-dsh'
+        hint: started.hint || (started.reason === 'no-dsh'
           ? '远端找不到 dsh（PATH 和 ~/.local/dsh 都没有）。先在远端安装，或让 AI 帮你准备。'
-          : `启动命令执行失败：${started.reason}`,
+          : `启动命令执行失败：${started.reason}`),
         actions: [aiAction('remote', host.name, started.reason)],
       })
     }
@@ -555,7 +590,7 @@ async function openHost(body) {
         error: '已启动，但 30 秒内没有就绪',
         code: 'START_TIMEOUT',
         detail: health.reason,
-        hint: '可能启动较慢或启动失败。查看远端日志：tail -n 20 ~/.dsh-web.log；或让 AI 介入排查。',
+        hint: '可能启动较慢或启动失败。POSIX 远端看 ~/.dsh-web.log；Windows 看 %USERPROFILE%\\.dsh-web.log；或让 AI 介入排查。',
         actions: [aiAction('remote', host.name, '启动后 30 秒未就绪')],
       })
     }
@@ -643,6 +678,7 @@ async function handleFetch(request) {
         localPort: host.localPort ? Number(host.localPort) : undefined,
         token: host.token ? String(host.token) : undefined,
         startCommand: host.startCommand ? String(host.startCommand) : undefined,
+        stopCommand: host.stopCommand ? String(host.stopCommand) : undefined,
       }))
       const current = await loadConfig()
       await saveConfig({ settings: current.settings, hosts: cleaned })

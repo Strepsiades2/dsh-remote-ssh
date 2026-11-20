@@ -166,6 +166,36 @@ Also an authorised procedure. Stop, uninstall, verify — do not "improve" the m
 5. **Keep the data** unless the user asked otherwise: `~/.dsh/sessions` and `~/.dsh/.credentials.yaml` are user data, not installation.
 6. Verify: `command -v node`, `command -v npm`, `command -v dsh` all empty; no listener on the port; the artifacts above gone.
 
+## Windows native hosts
+
+The plugin executes only the host's `startCommand` and `stopCommand` over SSH. It does not install, upgrade, or repair DSH. Prepare the host first, then put the final command in the host entry.
+
+- SSH may use a non-default port (for example 2222). Add a `Host` block in `~/.ssh/config` and use it as the plugin alias.
+- The profile must resolve the official packages. If `dsh web` fails with `ERR_MODULE_NOT_FOUND` for `@deepseek-ai/*`, link the global package's nested modules with a junction (no admin):
+  ```powershell
+  cmd.exe /c mklink /J "%USERPROFILE%\.dsh\profiles\web\node_modules\@deepseek-ai" "%APPDATA%\npm\node_modules\@deepseek-ai\dsh\node_modules\@deepseek-ai"
+  ```
+- `Start-Process` children die when the SSH channel closes. Start detached with WMI and a wrapper PS1:
+  ```powershell
+  $run = Join-Path $env:USERPROFILE '.dsh-web-run.ps1'
+  Set-Content $run '& "$env:APPDATA\npm\dsh.ps1" web --host 127.0.0.1 --port 3000 --no-open *> "$env:USERPROFILE\.dsh-web.log"'
+  Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + $run + '"' }
+  ```
+  WMI creates the process as the SSH user (not SYSTEM); it survives the SSH session. A user-space install and port 3000 need no admin/UAC.
+- Turn the preparation into a script the agent owns, such as `C:\Users\<user>\.dsh-web-start.ps1`, then set the host's `startCommand` to:
+  ```text
+  powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\<user>\.dsh-web-start.ps1 -Port {port}
+  ```
+  The script should create the junction, write the wrapper, WMI-create it, and redirect the token to `%USERPROFILE%\.dsh-web.log`.
+- `stopCommand` is optional; it replaces the POSIX stop. Example:
+  ```powershell
+  $p = (Get-NetTCPConnection -LocalPort {port} -State Listen).OwningProcess
+  Get-CimInstance Win32_Process -Filter "ProcessId=$p" | Where-Object CommandLine -match 'dsh' | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+  ```
+  Only same-user processes can be stopped; an elevated or other-user DSH needs admin.
+- WSL is not supported by the plugin: commands run on Windows and tokens are read from `%USERPROFILE%`. Run DSH natively on Windows, or bridge the WSL port/log manually.
+- If WMI is blocked by policy or antivirus, use a user scheduled task (`schtasks /create` plus `schtasks /run`) instead.
+
 ## Commands
 
 One-shot task — answer on stdout, diagnostics on stderr, then exit:

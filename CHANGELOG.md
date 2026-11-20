@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0
+
+- 新增：每台主机可配置 `stopCommand`；`startCommand` / `stopCommand` 都支持 `{port}`
+- 变更：插件只执行 host 配置里的启停命令，不再自动探测 Windows、创建 profile junction 或用 WMI 兜底
+- 改进：启动/停止失败时，针对 Windows 上执行 POSIX 脚本、profile 缺包、端口占用给出提示
+- 文档：README 精简；安装只保留 `dsh plugin --profile <profile> add <pkg>` + Plugins 启用；删除自建插件索引 `market/index.json` 与生成脚本
+- 技能：`remote-dsh-ops` 增加 Windows native hosts 一节
+
 ## 1.1.0
 
 - 新增：**加密私钥口令支持**。`IdentityFile` 带口令时不再只能依赖 ssh-agent：
@@ -16,8 +24,8 @@
 - 传输层：纯 JS `ssh2`（0.8.0），不依赖系统 ssh / askpass / ControlMaster
 - ProxyJump：单跳与链式 SSH over SSH（0.8.1）
 - 读 token：SFTP 直接读远端日志，不依赖远程 shell（0.8.2）
-- 发布准备：`engines.dsh`、显式 `icon`、截图、插件市场索引与生成脚本
-- 文档：README 中英双语，补充安装（npm / 插件索引）、平台矩阵、已知缺口
+- 发布准备：`engines.dsh`、显式 `icon`、截图
+- 文档：README 中英双语，补充安装（npm）、平台矩阵、已知缺口
 
 ## 0.8.2
 
